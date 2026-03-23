@@ -10,6 +10,8 @@ import numpy as np
 
 @dataclass
 class SolverResult:
+    """Container for mixed-model solver outputs and convergence metadata."""
+
     theta: np.ndarray
     beta: np.ndarray
     u: List[np.ndarray]
@@ -22,6 +24,7 @@ class SolverResult:
 
 
 def _as_col(y: np.ndarray) -> np.ndarray:
+    """Return y as an n x 1 column vector for univariate solvers."""
     y = np.asarray(y, dtype=float)
     if y.ndim == 1:
         return y[:, None]
@@ -31,6 +34,7 @@ def _as_col(y: np.ndarray) -> np.ndarray:
 
 
 def _safe_inv(a: np.ndarray, tolparinv: float) -> np.ndarray:
+    """Invert a symmetric matrix, adding ridge regularization if needed."""
     a = (a + a.T) / 2.0
     try:
         return np.linalg.inv(a)
@@ -39,6 +43,7 @@ def _safe_inv(a: np.ndarray, tolparinv: float) -> np.ndarray:
 
 
 def _build_v(theta: np.ndarray, dv: Sequence[np.ndarray]) -> np.ndarray:
+    """Assemble the covariance matrix V from variance components and bases."""
     v = np.zeros_like(dv[0])
     for t, dvi in zip(theta, dv):
         v += t * dvi
@@ -51,6 +56,7 @@ def _initialize_theta(
     theta_init: np.ndarray | None,
     tolpar: float,
 ) -> np.ndarray:
+    """Create a valid initial variance-component vector."""
     if theta_init is None:
         vy = float(np.var(y, ddof=1))
         theta = np.full(m, vy / max(m, 1), dtype=float)
@@ -68,6 +74,7 @@ def _initialize_weights(
     stepweight: np.ndarray | None,
     emweight: np.ndarray | None,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-iteration step and EM-mixing weights."""
     if stepweight is None:
         step = np.full(iters, 0.9, dtype=float)
         if iters > 0:
@@ -90,6 +97,7 @@ def _initialize_weights(
 
 
 def _partition_indices(block_sizes: Sequence[int]) -> list[tuple[int, int]]:
+    """Convert block sizes into half-open index ranges."""
     parts: list[tuple[int, int]] = []
     start = 0
     for sz in block_sizes:
@@ -100,6 +108,7 @@ def _partition_indices(block_sizes: Sequence[int]) -> list[tuple[int, int]]:
 
 
 def _loglik_reml(y: np.ndarray, x: np.ndarray, v: np.ndarray, tolparinv: float) -> float:
+    """Compute the restricted log-likelihood for a Gaussian mixed model."""
     n = y.shape[0]
     p = x.shape[1]
 

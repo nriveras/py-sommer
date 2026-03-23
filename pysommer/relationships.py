@@ -8,6 +8,7 @@ import numpy as np
 
 
 def _impute_marker_means(x: np.ndarray) -> np.ndarray:
+    """Impute missing marker values with per-column means."""
     x = np.asarray(x, dtype=float)
     if x.ndim != 2:
         raise ValueError("x must be a 2D marker matrix")
@@ -20,6 +21,7 @@ def _impute_marker_means(x: np.ndarray) -> np.ndarray:
 
 
 def _filter_markers(x: np.ndarray, min_maf: float) -> np.ndarray:
+    """Drop markers failing minor-allele-frequency or variance filters."""
     pfreq = np.mean(x + 1.0, axis=0) / 2.0
     maf = np.minimum(pfreq, 1.0 - pfreq)
     idx_maf = maf > min_maf
@@ -113,6 +115,7 @@ def E_mat(
 
 
 def _safe_inv_sympd(a: np.ndarray, tolparinv: float) -> np.ndarray:
+    """Invert a symmetric matrix, adding a diagonal ridge on failure."""
     a = (a + a.T) / 2.0
     try:
         return np.linalg.inv(a)

@@ -176,6 +176,7 @@ def _run_mmes_matrix_dispatch(
 
 
 def _normalize_random(random: Sequence[VSMCall] | VSMCall | None) -> list[VSMCall]:
+    """Normalize random declarations to a list of VSM calls."""
     if random is None:
         return []
     if isinstance(random, VSMCall):

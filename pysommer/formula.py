@@ -43,22 +43,27 @@ class VSMCall:
 
 
 def ism(var: str) -> ISM:
+    """Declare an identity-structured random effect for a variable."""
     return ISM(var=var)
 
 
 def dsm(var: str) -> DSM:
+    """Declare a diagonal-by-level random-effect structure for a variable."""
     return DSM(var=var)
 
 
 def usm(var: str) -> USM:
+    """Declare an unstructured random-effect marker for a variable."""
     return USM(var=var)
 
 
 def vsm(*structures: Any, Gu: np.ndarray | None = None, Cu: np.ndarray | None = None) -> VSMCall:
+    """Build a lightweight sommer-style variance-structure declaration."""
     return VSMCall(structures=tuple(structures), Gu=Gu, Cu=Cu)
 
 
 def _fetch_col(data: Mapping[str, Any], key: str) -> np.ndarray:
+    """Fetch a 1D column from formula-mode data by key."""
     if key not in data:
         raise KeyError(f"Column '{key}' was not found in data")
     col = np.asarray(data[key])
@@ -68,6 +73,7 @@ def _fetch_col(data: Mapping[str, Any], key: str) -> np.ndarray:
 
 
 def _encode_categorical(x: np.ndarray, drop_first: bool) -> tuple[np.ndarray, np.ndarray]:
+    """One-hot encode a categorical vector and return encoded levels."""
     levels, inv = np.unique(x, return_inverse=True)
     mat = np.eye(levels.size, dtype=float)[inv]
     if drop_first and mat.shape[1] > 1:

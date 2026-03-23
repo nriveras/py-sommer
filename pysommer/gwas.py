@@ -8,6 +8,7 @@ from .solver import _safe_inv
 
 
 def _n_marker_blocks(mimv: np.ndarray, nt: int) -> int:
+    """Return the number of marker blocks after accounting for trait expansion."""
     if nt <= 1:
         return mimv.shape[1]
     if mimv.shape[1] % nt != 0:

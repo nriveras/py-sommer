@@ -53,6 +53,7 @@ def is_identity_mat(x: np.ndarray, atol: float = 1e-12) -> bool:
 
 
 def is_diagonal_mat(x: np.ndarray, atol: float = 1e-12) -> bool:
+    """Return True when x is a square diagonal matrix within tolerance."""
     x = np.asarray(x, dtype=float)
     if x.ndim != 2 or x.shape[0] != x.shape[1]:
         return False
