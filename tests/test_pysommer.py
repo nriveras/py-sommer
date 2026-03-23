@@ -480,6 +480,153 @@ def test_reference_nearpd_if_available():
     _assert_close(out, near_ref, atol=1e-5, rtol=1e-4)
 
 
+def test_edge_case_small_sample():
+    """Test stability with minimal sample size (n=5)."""
+    rng = np.random.default_rng(501)
+    n = 5
+    n_groups = 2
+    group = np.array([0, 0, 0, 1, 1])
+    Z = np.eye(n_groups)[group]
+    X = np.ones((n, 1), dtype=float)
+    y = rng.normal(0.0, 1.0, size=(n, 1))
+
+    out = mmes(Y=y, X=X, Z=[Z], K=[np.eye(n_groups)], iters=20)
+    assert out["converged"] or out["iterations"] == 20
+    assert np.all(np.asarray(out["theta"]) > 0)
+
+
+def test_edge_case_large_variance_ratio():
+    """Test stability with extreme variance ratios."""
+    rng = np.random.default_rng(502)
+    n = 30
+    n_groups = 10
+    group = np.repeat(np.arange(n_groups), 3)
+    Z = np.eye(n_groups)[group]
+    X = np.ones((n, 1), dtype=float)
+
+    # Very large random effect variance vs residual
+    u_large = rng.normal(0.0, 100.0, size=(n_groups, 1))
+    e_small = rng.normal(0.0, 0.01, size=(n, 1))
+    y = 1.0 + Z @ u_large + e_small
+
+    out = mmes(Y=y, X=X, Z=[Z], K=[np.eye(n_groups)], iters=40)
+    assert np.all(np.isfinite(np.asarray(out["theta"])))
+
+
+def test_edge_case_perfect_collinearity_in_random_effects():
+    """Test behavior with perfectly replicated random effect levels."""
+    rng = np.random.default_rng(503)
+    n = 20
+    group = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+    Z = np.eye(2)[group]
+    X = np.ones((n, 1), dtype=float)
+    y = 2.0 + rng.normal(0.0, 0.3, size=(n, 1))
+
+    out = mmes(Y=y, X=X, Z=[Z], K=[np.eye(2)], iters=30)
+    assert np.isfinite(out["theta"]).all()
+    assert np.isfinite(out["beta"]).all()
+
+
+def test_edge_case_identity_relationship_matrix():
+    """Test with identity relationship matrix (unrelated individuals)."""
+    rng = np.random.default_rng(504)
+    n = 25
+    Z = np.eye(n)
+    X = np.ones((n, 1), dtype=float)
+    y = rng.normal(2.0, 1.0, size=(n, 1))
+
+    out = mmes(Y=y, X=X, Z=[Z], K=[np.eye(n)], iters=20)
+    assert np.isfinite(out["theta"]).all()
+
+
+def test_edge_case_balanced_vs_unbalanced_design():
+    """Compare solver behavior on balanced vs unbalanced designs."""
+    rng = np.random.default_rng(505)
+    n_groups = 5
+
+    # Balanced: 4 reps per group
+    group_bal = np.repeat(np.arange(n_groups), 4)
+    Z_bal = np.eye(n_groups)[group_bal]
+    y_bal = 1.5 + Z_bal @ rng.normal(0.0, 0.8, size=(n_groups, 1)) + rng.normal(0.0, 0.3, size=(group_bal.size, 1))
+
+    # Unbalanced: varying reps per group
+    group_unbal = np.array([0, 0, 1, 1, 1, 2, 3, 3, 3, 3, 4])
+    Z_unbal = np.eye(n_groups)[group_unbal]
+    y_unbal = 1.5 + Z_unbal @ rng.normal(0.0, 0.8, size=(n_groups, 1)) + rng.normal(0.0, 0.3, size=(group_unbal.size, 1))
+
+    out_bal = mmes(Y=y_bal.ravel(), X=np.ones((group_bal.size, 1)), Z=[Z_bal], K=[np.eye(n_groups)], iters=30)
+    out_unbal = mmes(Y=y_unbal.ravel(), X=np.ones((group_unbal.size, 1)), Z=[Z_unbal], K=[np.eye(n_groups)], iters=30)
+
+    assert np.isfinite(out_bal["theta"]).all()
+    assert np.isfinite(out_unbal["theta"]).all()
+
+
+def test_solver_consistency_across_methods():
+    """Regression test: both solvers should produce similar results on same data."""
+    rng = np.random.default_rng(506)
+    n_groups = 12
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+    n = group.size
+
+    Z = np.eye(n_groups)[group]
+    X = np.ones((n, 1), dtype=float)
+    u_true = rng.normal(0.0, np.sqrt(0.7), size=(n_groups, 1))
+    e = rng.normal(0.0, np.sqrt(0.3), size=(n, 1))
+    y = 1.5 + Z @ u_true + e
+
+    out_newton = mmes(Y=y, X=X, Z=[Z], K=[np.eye(n_groups)], method="newton_di_sp", iters=50)
+    out_ai = mmes(Y=y, X=X, Z=[Z], K=[np.eye(n_groups)], method="ai_mme_sp", iters=50)
+
+    np.testing.assert_allclose(out_newton["beta"], out_ai["beta"], atol=1e-1, rtol=1e-1)
+    np.testing.assert_allclose(out_newton["theta"], out_ai["theta"], atol=1e-1, rtol=1e-1)
+
+
+def test_matrix_vs_formula_interface_consistency():
+    """Regression test: matrix and formula interfaces should give identical results."""
+    rng = np.random.default_rng(507)
+    n_groups = 8
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+    Z = np.eye(n_groups)[group]
+    y = 2.0 + Z @ rng.normal(0.0, 0.8, size=(n_groups, 1)) + rng.normal(0.0, 0.3, size=(group.size, 1))
+
+    # Matrix interface
+    X = np.ones((group.size, 1), dtype=float)
+    out_matrix = mmes(Y=y.ravel(), X=X, Z=[Z], K=[np.eye(n_groups)], iters=35)
+
+    # Formula interface
+    data = {"y": y.ravel(), "group": group}
+    out_formula = mmes(fixed="y ~ 1", random=[vsm(ism("group"))], data=data, iters=35)
+
+    np.testing.assert_allclose(out_matrix["beta"], out_formula["beta"], atol=1e-8, rtol=1e-8)
+    np.testing.assert_allclose(out_matrix["theta"], out_formula["theta"], atol=1e-8, rtol=1e-8)
+
+
+def test_multivariate_independent_vs_sequential():
+    """Regression test: multivariate fit should match sequential univariate fits."""
+    rng = np.random.default_rng(508)
+    n_groups = 6
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+    Z = np.eye(n_groups)[group]
+    X = np.ones((group.size, 1), dtype=float)
+
+    y1 = 1.0 + Z @ rng.normal(0.0, 0.6, size=(n_groups, 1)) + rng.normal(0.0, 0.2, size=(group.size, 1))
+    y2 = 2.0 + Z @ rng.normal(0.0, 0.8, size=(n_groups, 1)) + rng.normal(0.0, 0.25, size=(group.size, 1))
+
+    # Multivariate fit
+    Y_mv = np.hstack([y1, y2])
+    out_mv = mmes(Y=Y_mv, X=X, Z=[Z], K=[np.eye(n_groups)], iters=35)
+
+    # Sequential univariate fits
+    out_y1 = mmes(Y=y1.ravel(), X=X, Z=[Z], K=[np.eye(n_groups)], iters=35)
+    out_y2 = mmes(Y=y2.ravel(), X=X, Z=[Z], K=[np.eye(n_groups)], iters=35)
+
+    np.testing.assert_allclose(out_mv["beta"][:, 0], out_y1["beta"].ravel(), atol=1e-6, rtol=1e-6)
+    np.testing.assert_allclose(out_mv["beta"][:, 1], out_y2["beta"].ravel(), atol=1e-6, rtol=1e-6)
+
+
 def test_reference_solver_if_available():
     path = REF_DIR / "mmes_reference.json"
     if not path.exists():
