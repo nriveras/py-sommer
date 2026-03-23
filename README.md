@@ -31,35 +31,38 @@ Important attribution note:
 
 The upstream sommer package is distributed under GPL (>= 2). Please review licensing obligations before redistribution or integration of derived work.
 
-## Python Installation
+## Python Installation (uv)
 
-### Option 1: Install from this repository (recommended)
+### Install uv
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Sync dependencies from this repository (recommended)
 
 ```bash
 git clone https://github.com/nriveras/py-sommer
 cd py-sommer
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
+uv sync
 ```
 
-### Option 2: Development install with test dependencies
+### Include development dependencies
 
 ```bash
-python -m pip install -e .[dev]
+uv sync --dev
 ```
 
 ### Verify installation
 
 ```bash
-python -c "import pysommer; print('ok')"
+uv run python -c "import pysommer; print('ok')"
 ```
 
 ### Run tests
 
 ```bash
-python -m pytest tests/test_pysommer.py -q
+uv run pytest tests/test_pysommer.py -q
 ```
 
 ### Generate R reference outputs (optional cross-check)
