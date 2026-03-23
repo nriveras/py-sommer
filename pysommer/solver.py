@@ -282,9 +282,11 @@ def ai_mme_sp(
     stepweight: np.ndarray | None = None,
     emweight: np.ndarray | None = None,
 ) -> SolverResult:
-    """Henderson-style MME REML updates (simplified ai_mme_sp translation).
+    """Henderson-style MME REML updates (AI/EM hybrid).
 
-    This solver focuses on univariate models and a dense-matrix implementation.
+    This implements a univariate, dense-matrix translation of the Henderson MME
+    update route where variance components are updated from MME-derived first
+    derivatives and an Average Information matrix built from working variates.
     """
     y = _as_col(Y)
     x = np.asarray(X, dtype=float)
@@ -316,7 +318,7 @@ def ai_mme_sp(
         emweight=emweight,
     )
 
-    # Used for comparable logLik and residual updates.
+    # Keep direct V decomposition for logLik parity with newton_di_sp.
     dv = [zi @ ki @ zi.T for zi, ki in zip(z_list, k_list)] + [r0]
 
     q_sizes = [zi.shape[1] for zi in z_list]
@@ -329,22 +331,27 @@ def ai_mme_sp(
     beta = np.zeros((x.shape[1], 1), dtype=float)
     u_hat_stack = np.zeros((q_total, 1), dtype=float)
     c_uu = np.zeros((q_total, q_total), dtype=float)
+    w_mat = np.hstack([x, z_all]) if q_total > 0 else x
 
     r0_inv = _safe_inv(r0, tolparinv=tolparinv)
 
     for it in range(iters):
-        # Build scaled inverse residual covariance.
-        r_inv = r0_inv / max(theta[-1], tolpar)
+        sigma_e = max(theta[-1], tolpar)
+        r_inv = r0_inv / sigma_e
 
-        # Build block-diagonal G^{-1}.
+        # Build block-diagonal G^{-1} = blockdiag(K_i^{-1}/theta_i).
         if q_total > 0:
             g_inv = np.zeros((q_total, q_total), dtype=float)
+            k_inv_list: list[np.ndarray] = []
             for (start, end), ki, th in zip(u_parts, k_list, theta[:-1]):
                 ki_inv = _safe_inv(ki, tolparinv=tolparinv)
+                k_inv_list.append(ki_inv)
                 g_inv[start:end, start:end] = ki_inv / max(th, tolpar)
         else:
             g_inv = np.zeros((0, 0), dtype=float)
+            k_inv_list = []
 
+        # Build and solve mixed model equations.
         x_r = x.T @ r_inv
         c11 = x_r @ x
         rhs1 = x_r @ y
@@ -378,32 +385,55 @@ def ai_mme_sp(
             fitted = fitted + z_all @ u_hat_stack
         resid = y - fitted
 
-        theta_new = theta.copy()
+        # First derivatives and EM information proxy.
+        dlu = np.zeros(m, dtype=float)
+        em_info = np.zeros((m, m), dtype=float)
+        wu_cols: list[np.ndarray] = []
 
-        # Random-effect variance component updates.
-        for idx, ((start, end), ki) in enumerate(zip(u_parts, k_list)):
+        for idx, ((start, end), zi, ki_inv) in enumerate(zip(u_parts, z_list, k_inv_list)):
+            th_i = max(theta[idx], tolpar)
             ui = u_hat_stack[start:end, :]
             cuu_i = c_uu[start:end, start:end]
-            ki_inv = _safe_inv(ki, tolparinv=tolparinv)
+            qi = max(end - start, 1)
 
-            em_est = float(np.asarray((ui.T @ ki_inv @ ui) / max(ki.shape[0], 1)).squeeze())
-            ai_est = float(
-                np.asarray((ui.T @ ki_inv @ ui + np.trace(ki_inv @ cuu_i)) / max(ki.shape[0], 1)).squeeze()
-            )
+            quad = float(np.asarray(ui.T @ ki_inv @ ui).squeeze())
+            tr_term = float(np.trace(ki_inv @ cuu_i))
+            num = quad + tr_term
 
-            proposed = (1.0 - emweight[it]) * ai_est + emweight[it] * em_est
-            theta_new[idx] = max(
-                (1.0 - stepweight[it]) * theta[idx] + stepweight[it] * proposed,
-                tolpar,
-            )
+            dlu[idx] = (qi / th_i) - (num / (th_i**2))
+            em_info[idx, idx] = qi / (th_i**2)
 
-        # Residual variance update.
-        e_quad = float(np.asarray(resid.T @ r0_inv @ resid).squeeze())
-        sigma_e = e_quad / max(n - x.shape[1], 1)
-        theta_new[-1] = max(
-            (1.0 - stepweight[it]) * theta[-1] + stepweight[it] * sigma_e,
-            tolpar,
-        )
+            # Working variate for this random term: Z * (K^{-1} u / theta).
+            u_sinv = (ki_inv @ ui) / th_i
+            wu_cols.append(zi @ u_sinv)
+
+        ri2 = r_inv @ r_inv
+        tr_ri = float(np.trace(r_inv))
+        c_trace = float(np.trace(c_inv @ (w_mat.T @ ri2 @ w_mat)))
+        e_quad = float(np.asarray(resid.T @ ri2 @ resid).squeeze())
+        dlu[-1] = tr_ri - c_trace - e_quad
+        em_info[-1, -1] = n / (sigma_e**2)
+        wu_cols.append(r_inv @ resid)
+
+        wu = np.hstack(wu_cols) if len(wu_cols) > 0 else np.zeros((n, 0), dtype=float)
+
+        # Average Information matrix from working variates.
+        xw = w_mat.T @ r_inv @ wu
+        wiwj = wu.T @ r_inv @ wu
+        bu_wu = c_inv @ xw
+        ai_info = wiwj - (bu_wu.T @ xw)
+        ai_info = (ai_info + ai_info.T) / 2.0
+
+        info = (1.0 - emweight[it]) * ai_info + emweight[it] * em_info
+        info = (info + info.T) / 2.0 + np.eye(m, dtype=float) * tolparinv
+
+        try:
+            delta = np.linalg.solve(info, dlu)
+        except np.linalg.LinAlgError:
+            delta = np.linalg.pinv(info) @ dlu
+
+        theta_new = theta - stepweight[it] * delta
+        theta_new = np.maximum(theta_new, tolpar)
 
         diff = np.linalg.norm(theta_new - theta)
         theta = theta_new

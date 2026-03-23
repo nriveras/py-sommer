@@ -162,6 +162,53 @@ def test_solver_ai_mme_sp_path():
     assert out["fitted"].shape == y.shape
 
 
+def test_solver_ai_mme_sp_agrees_with_newton_on_simple_case():
+    rng = np.random.default_rng(1201)
+    n_groups = 12
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+    n = group.size
+
+    z = np.eye(n_groups)[group]
+    x = np.ones((n, 1), dtype=float)
+    k = np.eye(n_groups, dtype=float)
+
+    u_true = rng.normal(0.0, np.sqrt(0.9), size=(n_groups, 1))
+    e = rng.normal(0.0, np.sqrt(0.5), size=(n, 1))
+    y = 1.2 + z @ u_true + e
+
+    out_newton = mmes(Y=y, X=x, Z=[z], K=[k], method="newton_di_sp", iters=60)
+    out_hend = mmes(Y=y, X=x, Z=[z], K=[k], method="ai_mme_sp", iters=60)
+
+    np.testing.assert_allclose(out_hend["theta"], out_newton["theta"], atol=2e-2, rtol=2e-1)
+    np.testing.assert_allclose(out_hend["beta"], out_newton["beta"], atol=2e-2, rtol=2e-1)
+    np.testing.assert_allclose(out_hend["fitted"], out_newton["fitted"], atol=4e-2, rtol=2e-1)
+
+
+def test_formula_mode_ai_mme_sp_solver_path():
+    rng = np.random.default_rng(1202)
+    n_groups = 9
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+    n = group.size
+
+    z = np.eye(n_groups)[group]
+    y = 2.1 + z @ rng.normal(0.0, 0.7, size=(n_groups, 1)) + rng.normal(0.0, 0.3, size=(n, 1))
+    data = {"y": y.ravel(), "group": group}
+
+    out = mmes(
+        fixed="y ~ 1",
+        random=[vsm(ism("group"))],
+        data=data,
+        method="ai_mme_sp",
+        iters=50,
+    )
+
+    assert len(out["u"]) == 1
+    assert out["beta"].shape == (1, 1)
+    assert np.all(np.asarray(out["theta"]) > 0)
+
+
 def test_formula_api_with_ism_and_dsm():
     rng = np.random.default_rng(202)
     n_groups = 8
