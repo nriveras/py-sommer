@@ -2,6 +2,16 @@
 
 This repository contains a Python translation of core computational components from the R package sommer.
 
+## Repository Layout
+
+The repository root is focused on the Python translation project (`pysommer`).
+
+The original/forked upstream R package source has been moved to:
+
+- `upstream_r_sommer/`
+
+This keeps Python packaging and development workflows clean while preserving upstream reference code.
+
 Current scope focuses on explicit matrix-based mixed model computation in Python (NumPy/SciPy), including:
 1. Utility matrix helpers
 2. Relationship matrices (A, D, E, H)

@@ -1,21 +1,21 @@
 # Translate sommer R Package Core to Python
 
-Translate the core computational functions of the [sommer](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#337-364) R package (mixed model REML solver) to a pure-Python package using **numpy** and **scipy** only. The C++ code (RcppArmadillo) will be re-implemented in Python with numpy linear algebra.
+Translate the core computational functions of the [sommer](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#337-364) R package (mixed model REML solver) to a pure-Python package using **numpy** and **scipy** only. The C++ code (RcppArmadillo) will be re-implemented in Python with numpy linear algebra.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **Scope decision**: The full [sommer](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#337-364) package has a complex formula-parsing API (`mmes()`, `vsm()`, etc.) that is deeply tied to R's formula system. I propose translating only the **computational core** in Phase 1, keeping the Python API as explicit matrix-based calls (no formula parsing). A higher-level API can be added later.
+> **Scope decision**: The full [sommer](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#337-364) package has a complex formula-parsing API (`mmes()`, `vsm()`, etc.) that is deeply tied to R's formula system. I propose translating only the **computational core** in Phase 1, keeping the Python API as explicit matrix-based calls (no formula parsing). A higher-level API can be added later.
 
 > [!WARNING]
-> **GWAS functions**: [scorecalc](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#203-205) and [gwasForLoop](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#220-222) are specialized GWAS tools. Should I include these in the first pass, or defer them? They add ~200 lines of C++ but are secondary to the core mixed model solver.
+> **GWAS functions**: [scorecalc](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#203-205) and [gwasForLoop](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#220-222) are specialized GWAS tools. Should I include these in the first pass, or defer them? They add ~200 lines of C++ but are secondary to the core mixed model solver.
 
 > [!IMPORTANT]
 > **Solver choice**: The package has two REML solvers:
-> 1. [newton_di_sp](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#521-1283) — Direct-Inversion Newton-Raphson/AI (for p > n problems)
-> 2. [ai_mme_sp](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#1366-2162) — Henderson-based AI (for n > p problems)
+> 1. [newton_di_sp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#521-1283) — Direct-Inversion Newton-Raphson/AI (for p > n problems)
+> 2. [ai_mme_sp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#1366-2162) — Henderson-based AI (for n > p problems)
 >
-> I propose starting with [newton_di_sp](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#521-1283) only, as it's the default and most commonly used. We can add [ai_mme_sp](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#1366-2162) later.
+> I propose starting with [newton_di_sp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#521-1283) only, as it's the default and most commonly used. We can add [ai_mme_sp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#1366-2162) later.
 
 ---
 
@@ -28,7 +28,7 @@ Translate the core computational functions of the [sommer](file:///Users/nico/De
 Comprehensive R test script that:
 - Tests each core function with known inputs
 - Saves numerical outputs to CSV/JSON files in `tests/reference_data/`
-- Covers: `A.mat`, `D.mat`, `E.mat`, `H.mat`, `AR1`, `CS`, `ARMA`, [nearPDcpp](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#291-293), [scaleCpp](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#154-168), [makeFull](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#94-96), and a simple `mmes()` univariate model
+- Covers: `A.mat`, `D.mat`, `E.mat`, `H.mat`, `AR1`, `CS`, `ARMA`, [nearPDcpp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#291-293), [scaleCpp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#154-168), [makeFull](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#94-96), and a simple `mmes()` univariate model
 - Uses small, reproducible datasets (synthetic marker matrices, the built-in datasets)
 
 ---
@@ -45,14 +45,14 @@ Python equivalents of C++ utility functions:
 
 | C++ function | Python implementation |
 |---|---|
-| [seqCpp(a, b)](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#36-48) | `np.arange(a, b+1)` |
-| [varCols(x)](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#130-153) | `np.var(x, axis=0, ddof=1)` |
-| [scaleCpp(x)](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#154-168) | Center + scale by column std |
-| [makeFull(X)](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#94-96) | SVD-based full-rank column extraction |
-| [isIdentity_mat(x)](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#105-107) | `np.allclose(x, np.eye(n))` |
-| [isDiagonal_mat(x)](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#218-229) | Check off-diagonals are zero |
-| [mat_to_vecCpp(x, x2)](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#49-73) | Extract upper-tri elements where constraint > 0 |
-| [vec_to_matCpp(x, x2)](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#48-50) | Reconstruct matrix from vector + constraint |
+| [seqCpp(a, b)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#36-48) | `np.arange(a, b+1)` |
+| [varCols(x)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#130-153) | `np.var(x, axis=0, ddof=1)` |
+| [scaleCpp(x)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#154-168) | Center + scale by column std |
+| [makeFull(X)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#94-96) | SVD-based full-rank column extraction |
+| [isIdentity_mat(x)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#105-107) | `np.allclose(x, np.eye(n))` |
+| [isDiagonal_mat(x)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#218-229) | Check off-diagonals are zero |
+| [mat_to_vecCpp(x, x2)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#49-73) | Extract upper-tri elements where constraint > 0 |
+| [vec_to_matCpp(x, x2)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#48-50) | Reconstruct matrix from vector + constraint |
 
 #### [NEW] [relationships.py](file:///Users/nico/Desktop/Projects/py-sommer/pysommer/relationships.py)
 
@@ -77,11 +77,11 @@ Covariance structure constructors:
 
 #### [NEW] [nearPD.py](file:///Users/nico/Desktop/Projects/py-sommer/pysommer/nearPD.py)
 
-[nearPD(X, maxit, eig_tol, conv_tol)](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#291-293) — Nearest positive definite matrix algorithm, translated from the C++ [nearPDcpp](file:///Users/nico/Desktop/Projects/py-sommer/src/RcppExports.cpp#291-293).
+[nearPD(X, maxit, eig_tol, conv_tol)](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#291-293) — Nearest positive definite matrix algorithm, translated from the C++ [nearPDcpp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/RcppExports.cpp#291-293).
 
 #### [NEW] [solver.py](file:///Users/nico/Desktop/Projects/py-sommer/pysommer/solver.py)
 
-The REML solver, translated from [newton_di_sp](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp#521-1283) in [MNR.cpp](file:///Users/nico/Desktop/Projects/py-sommer/src/MNR.cpp). This is the largest and most complex piece (~600 lines of C++ → ~400 lines of Python). Implements:
+The REML solver, translated from [newton_di_sp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp#521-1283) in [MNR.cpp](file:///Users/nico/Desktop/Projects/py-sommer/upstream_r_sommer/src/MNR.cpp). This is the largest and most complex piece (~600 lines of C++ → ~400 lines of Python). Implements:
 - V matrix construction from variance components
 - Projection matrix P = Vi - Vi X (X'Vi X)^-1 X' Vi  
 - Score (first derivatives) and Information matrix (second derivatives)
