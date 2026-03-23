@@ -1,3 +1,14 @@
+Metadata-Version: 2.4
+Name: pysommer
+Version: 0.1.0
+Summary: Python translation of core computational routines from sommer
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.23
+Requires-Dist: scipy>=1.10
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+
 # py-sommer: Python Translation of sommer Core
 
 This repository contains a Python translation of core computational components from the R package sommer.
@@ -36,7 +47,7 @@ The upstream sommer package is distributed under GPL (>= 2). Please review licen
 ### Option 1: Install from this repository (recommended)
 
 ```bash
-git clone https://github.com/nriveras/py-sommer
+git clone https://github.com/<your-org-or-user>/py-sommer.git
 cd py-sommer
 python -m venv .venv
 source .venv/bin/activate
