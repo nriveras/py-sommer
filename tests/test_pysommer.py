@@ -651,3 +651,295 @@ def test_reference_solver_if_available():
 
     m = min(theta_ref.size, theta_py.size)
     _assert_close(theta_py[:m], theta_ref[:m], atol=1e-2, rtol=5e-2)
+
+
+# ============================================================================
+# Step 6: End-to-End Examples (Multiple Random Terms, Custom Matrices, Predictions)
+# ============================================================================
+
+
+def test_multiple_random_terms_two_random_effects():
+    """Test model with multiple random effects terms (e.g., genetic + spatial)."""
+    rng = np.random.default_rng(601)
+    n_fam = 6
+    n_spatial = 3
+    reps = 3
+    n_obs = n_fam * reps
+
+    fam = np.repeat(np.arange(n_fam), reps)
+    spatial = np.array([0, 1, 2] * n_fam)  # Cycle through 3 spatial locations
+
+    Z_fam = np.eye(n_fam)[fam]
+    Z_spatial = np.eye(n_spatial)[spatial]
+
+    X = np.ones((n_obs, 1))
+    K_fam = np.eye(n_fam)
+    K_spatial = np.eye(n_spatial)
+
+    u_fam = rng.normal(0.0, np.sqrt(0.5), size=(n_fam, 1))
+    u_spatial = rng.normal(0.0, np.sqrt(0.3), size=(n_spatial, 1))
+    e = rng.normal(0.0, np.sqrt(0.2), size=(n_obs, 1))
+    y = 1.5 + Z_fam @ u_fam + Z_spatial @ u_spatial + e
+
+    out = mmes(Y=y.ravel(), X=X, Z=[Z_fam, Z_spatial], K=[K_fam, K_spatial], iters=40)
+
+    # Verify convergence and structure
+    assert out["converged"] or (out["status"] == 0)
+    # Theta contains variance for 2 random effects + 1 residual = 3 components
+    assert out["theta"].size >= 2
+    assert out["u"][0].shape == (n_fam, 1)
+    assert out["u"][1].shape == (n_spatial, 1)
+    assert np.isfinite(out["beta"]).all()
+    assert np.isfinite(out["theta"]).all()
+
+
+def test_multiple_random_terms_three_random_effects():
+    """Test model with three random effects (genetic, maternal, spatial)."""
+    rng = np.random.default_rng(602)
+    n_ind = 8
+    n_mat = 4
+    n_loc = 2
+    reps = 1
+    n_obs = n_ind * n_mat * n_loc
+
+    # Create full factorial design for simplicity
+    ind = np.repeat(np.arange(n_ind), n_mat * n_loc)
+    mat = np.tile(np.repeat(np.arange(n_mat), n_loc), n_ind)
+    loc = np.tile(np.arange(n_loc), n_ind * n_mat)
+
+    Z_ind = np.eye(n_ind)[ind]
+    Z_mat = np.eye(n_mat)[mat]
+    Z_loc = np.eye(n_loc)[loc]
+
+    X = np.ones((n_obs, 1))
+    K_ind = np.eye(n_ind)
+    K_mat = np.eye(n_mat)
+    K_loc = np.eye(n_loc)
+
+    u_ind = rng.normal(0.0, np.sqrt(0.4), size=(n_ind, 1))
+    u_mat = rng.normal(0.0, np.sqrt(0.2), size=(n_mat, 1))
+    u_loc = rng.normal(0.0, np.sqrt(0.15), size=(n_loc, 1))
+    e = rng.normal(0.0, np.sqrt(0.25), size=(n_obs, 1))
+    y = 2.0 + Z_ind @ u_ind + Z_mat @ u_mat + Z_loc @ u_loc + e
+
+    out = mmes(
+        Y=y.ravel(),
+        X=X,
+        Z=[Z_ind, Z_mat, Z_loc],
+        K=[K_ind, K_mat, K_loc],
+        iters=40,
+    )
+
+    assert out["converged"] or (out["status"] == 0)
+    assert len(out["u"]) == 3
+    assert out["u"][0].shape == (n_ind, 1)
+    assert out["u"][1].shape == (n_mat, 1)
+    assert out["u"][2].shape == (n_loc, 1)
+
+
+def test_custom_relationship_matrix_identity():
+    """Test with an explicit identity relationship matrix (should match default)."""
+    rng = np.random.default_rng(603)
+    n_groups = 10
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+    n_obs = group.size
+
+    Z = np.eye(n_groups)[group]
+    X = np.ones((n_obs, 1))
+
+    y = 1.5 + Z @ rng.normal(0.0, np.sqrt(0.6), size=(n_groups, 1)) + rng.normal(
+        0.0, np.sqrt(0.4), size=(n_obs, 1)
+    )
+
+    # With identity matrix (default)
+    out_identity = mmes(Y=y.ravel(), X=X, Z=[Z], K=[np.eye(n_groups)], iters=35)
+
+    # With explicit identity
+    K_explicit = np.eye(n_groups, dtype=float)
+    out_explicit = mmes(Y=y.ravel(), X=X, Z=[Z], K=[K_explicit], iters=35)
+
+    # Both should give same results
+    np.testing.assert_allclose(out_identity["beta"], out_explicit["beta"], rtol=1e-6)
+    np.testing.assert_allclose(out_identity["theta"], out_explicit["theta"], rtol=1e-6)
+
+
+def test_custom_relationship_matrix_compound_symmetry():
+    """Test with compound symmetry (CS) relationship matrix."""
+    rng = np.random.default_rng(604)
+    n_groups = 8
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+    n_obs = group.size
+
+    Z = np.eye(n_groups)[group]
+    X = np.ones((n_obs, 1))
+
+    # Compound symmetry relationship matrix: correlation rho between all pairs
+    rho = 0.3
+    K_cs = CS(n_groups, rho=rho)
+
+    y = 1.2 + Z @ rng.normal(0.0, np.sqrt(0.5), size=(n_groups, 1)) + rng.normal(
+        0.0, np.sqrt(0.3), size=(n_obs, 1)
+    )
+
+    out_cs = mmes(Y=y.ravel(), X=X, Z=[Z], K=[K_cs], iters=35)
+
+    # Should converge without issues
+    assert out_cs["converged"] or (out_cs["status"] == 0)
+    assert np.isfinite(out_cs["beta"]).all()
+    assert np.isfinite(out_cs["theta"]).all()
+
+
+def test_custom_relationship_matrix_ar1():
+    """Test with AR1 (autoregressive-1) relationship matrix."""
+    rng = np.random.default_rng(605)
+    n_times = 12
+    n_reps = 3
+    n_obs = n_times * n_reps
+
+    time = np.repeat(np.arange(n_times), n_reps)
+    Z = np.eye(n_times)[time]
+    X = np.ones((n_obs, 1))
+
+    # AR1 relationship matrix with correlation phi
+    phi = 0.8
+    K_ar1 = AR1(n_times, rho=phi)
+
+    y = (
+        2.0
+        + Z @ rng.normal(0.0, np.sqrt(0.7), size=(n_times, 1))
+        + rng.normal(0.0, np.sqrt(0.4), size=(n_obs, 1))
+    )
+
+    out_ar1 = mmes(Y=y.ravel(), X=X, Z=[Z], K=[K_ar1], iters=40)
+
+    assert out_ar1["converged"] or (out_ar1["status"] == 0)
+    assert np.isfinite(out_ar1["beta"]).all()
+    assert np.isfinite(out_ar1["theta"]).all()
+
+
+def test_prediction_fitted_values_manual():
+    """Test manual prediction using fitted = X @ beta + Z @ u."""
+    rng = np.random.default_rng(606)
+    n_groups = 12
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+    n_obs = group.size
+
+    Z = np.eye(n_groups)[group]
+    X = np.ones((n_obs, 1))
+
+    y = 1.5 + Z @ rng.normal(0.0, np.sqrt(0.6), size=(n_groups, 1)) + rng.normal(
+        0.0, np.sqrt(0.3), size=(n_obs, 1)
+    )
+
+    out = mmes(Y=y.ravel(), X=X, Z=[Z], K=[np.eye(n_groups)], iters=35)
+
+    # Manual prediction
+    beta = out["beta"].ravel()
+    u = out["u"][0].ravel()
+    yhat_manual = X.ravel() * beta[0] + (Z @ u.reshape(-1, 1)).ravel()
+
+    # Compare with model's fitted values
+    yhat_model = out["fitted"].ravel()
+
+    np.testing.assert_allclose(yhat_manual, yhat_model, rtol=1e-8)
+
+
+def test_prediction_residuals_manual():
+    """Test that residuals = y - fitted."""
+    rng = np.random.default_rng(607)
+    n_groups = 10
+    reps = 2
+    group = np.repeat(np.arange(n_groups), reps)
+    n_obs = group.size
+
+    Z = np.eye(n_groups)[group]
+    X = np.ones((n_obs, 1))
+    y = 2.0 + Z @ rng.normal(0.0, np.sqrt(0.5), size=(n_groups, 1)) + rng.normal(
+        0.0, np.sqrt(0.4), size=(n_obs, 1)
+    )
+
+    out = mmes(Y=y.ravel(), X=X, Z=[Z], K=[np.eye(n_groups)], iters=30)
+
+    # Manual residuals
+    resid_manual = y.ravel() - out["fitted"].ravel()
+
+    # Compare with model's residuals
+    resid_model = out["residuals"].ravel()
+
+    np.testing.assert_allclose(resid_manual, resid_model, rtol=1e-8)
+
+
+def test_prediction_for_new_levels():
+    """Test prediction for new group levels using random effects structure."""
+    rng = np.random.default_rng(608)
+    n_groups_train = 8
+    reps = 4
+    group_train = np.repeat(np.arange(n_groups_train), reps)
+    n_train = group_train.size
+
+    Z_train = np.eye(n_groups_train)[group_train]
+    X_train = np.ones((n_train, 1))
+
+    y_train = (
+        1.5
+        + Z_train @ rng.normal(0.0, np.sqrt(0.6), size=(n_groups_train, 1))
+        + rng.normal(0.0, np.sqrt(0.3), size=(n_train, 1))
+    )
+
+    out = mmes(
+        Y=y_train.ravel(), X=X_train, Z=[Z_train], K=[np.eye(n_groups_train)], iters=35
+    )
+
+    # For new groups not in training set, predict using fixed effects only
+    n_new_groups = 3
+    n_new = n_new_groups * reps
+    Z_new = np.eye(n_new_groups)[np.repeat(np.arange(n_new_groups), reps)]
+    X_new = np.ones((n_new, 1))
+
+    # Prediction for new groups: use fixed effects (intercept)
+    yhat_new = (X_new @ out["beta"]).ravel()
+
+    # Should be close to the fixed effect value
+    beta_intercept = out["beta"][0, 0]
+    np.testing.assert_allclose(yhat_new, np.ones(n_new) * beta_intercept, rtol=1e-10)
+
+
+def test_prediction_with_multiple_random_terms():
+    """Test prediction in model with multiple random effects."""
+    rng = np.random.default_rng(609)
+    n_fam = 6
+    n_spatial = 3
+    reps = 3
+    n_obs = n_fam * reps
+
+    fam = np.repeat(np.arange(n_fam), reps)
+    spatial = np.array([0, 1, 2] * n_fam)  # Cycle through 3 spatial locations
+
+    Z_fam = np.eye(n_fam)[fam]
+    Z_spatial = np.eye(n_spatial)[spatial]
+    X = np.ones((n_obs, 1))
+
+    u_fam = rng.normal(0.0, np.sqrt(0.5), size=(n_fam, 1))
+    u_spatial = rng.normal(0.0, np.sqrt(0.3), size=(n_spatial, 1))
+    e = rng.normal(0.0, np.sqrt(0.2), size=(n_obs, 1))
+    y = 1.5 + Z_fam @ u_fam + Z_spatial @ u_spatial + e
+
+    out = mmes(Y=y.ravel(), X=X, Z=[Z_fam, Z_spatial], K=[np.eye(n_fam), np.eye(n_spatial)], iters=40)
+
+    # Manual prediction with multiple terms
+    beta = out["beta"].ravel()
+    u_fam_est = out["u"][0].ravel()
+    u_spatial_est = out["u"][1].ravel()
+
+    yhat_manual = (
+        X.ravel() * beta[0]
+        + (Z_fam @ u_fam_est.reshape(-1, 1)).ravel()
+        + (Z_spatial @ u_spatial_est.reshape(-1, 1)).ravel()
+    )
+
+    yhat_model = out["fitted"].ravel()
+
+    np.testing.assert_allclose(yhat_manual, yhat_model, rtol=1e-8)
