@@ -65,6 +65,46 @@ uv run python -c "import pysommer; print('ok')"
 uv run pytest tests/test_pysommer.py -q
 ```
 
+## Python Model Setup Example
+
+`pysommer.mmes` currently works with explicit matrices (not formula strings).
+
+```python
+import numpy as np
+from pysommer import mmes
+
+# n observations, one fixed intercept term.
+n_groups = 20
+reps = 3
+group = np.repeat(np.arange(n_groups), reps)
+n = group.size
+
+X = np.ones((n, 1), dtype=float)         # Fixed effects design matrix
+Z_id = np.eye(n_groups)[group]            # Random effect design matrix for group IDs
+K_id = np.eye(n_groups, dtype=float)      # Covariance/relationship matrix for random term
+
+# Example response.
+rng = np.random.default_rng(123)
+u = rng.normal(0, np.sqrt(1.2), size=(n_groups, 1))
+e = rng.normal(0, np.sqrt(0.4), size=(n, 1))
+y = 2.0 + Z_id @ u + e
+
+fit = mmes(
+	Y=y,
+	X=X,
+	Z=[Z_id],
+	K=[K_id],
+	iters=50,
+)
+
+print("converged:", fit["converged"])
+print("theta:", fit["theta"])
+print("beta:", fit["beta"].ravel())
+
+# Predicted values (fixed + random)
+yhat = X @ fit["beta"] + Z_id @ fit["u"][0]
+```
+
 ## Use In Jupyter Notebook
 
 ### 1. Sync project dependencies
