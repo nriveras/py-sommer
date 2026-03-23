@@ -441,7 +441,6 @@ def test_gwas_multivariate_matches_markerwise_scorecalc():
 def test_gwas_min_maf_filters_low_frequency_markers():
     rng = np.random.default_rng(305)
     n = 16
-    m = 3
 
     Z = np.eye(n)
     X = np.ones((n, 1), dtype=float)
@@ -699,7 +698,6 @@ def test_multiple_random_terms_three_random_effects():
     n_ind = 8
     n_mat = 4
     n_loc = 2
-    reps = 1
     n_obs = n_ind * n_mat * n_loc
 
     # Create full factorial design for simplicity
@@ -896,7 +894,6 @@ def test_prediction_for_new_levels():
     # For new groups not in training set, predict using fixed effects only
     n_new_groups = 3
     n_new = n_new_groups * reps
-    Z_new = np.eye(n_new_groups)[np.repeat(np.arange(n_new_groups), reps)]
     X_new = np.ones((n_new, 1))
 
     # Prediction for new groups: use fixed effects (intercept)
