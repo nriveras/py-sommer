@@ -14,13 +14,18 @@ from pysommer import (
     H_mat,
     make_full,
     mat_to_vec_cpp,
-    mmes,
     nearPD,
+    dsm,
+    gwasForLoop,
+    ism,
     scale_cpp,
+    scorecalc,
     seq_cpp,
     var_cols,
     vec_to_mat_cpp,
+    vsm,
 )
+from pysommer.mmes import mmes, mmes_formula
 
 
 REF_DIR = Path(__file__).parent / "reference_data"
@@ -127,6 +132,150 @@ def test_solver_random_intercept():
     assert np.all(np.asarray(out["theta"]) > 0)
     assert out["beta"].shape == (1, 1)
     assert len(out["u"]) == 1
+
+
+def test_solver_ai_mme_sp_path():
+    rng = np.random.default_rng(101)
+    n_groups = 16
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+    n = group.size
+
+    Z = np.eye(n_groups)[group]
+    X = np.ones((n, 1), dtype=float)
+    u_true = rng.normal(0, np.sqrt(0.8), size=(n_groups, 1))
+    e = rng.normal(0, np.sqrt(0.5), size=(n, 1))
+    y = 1.5 + Z @ u_true + e
+
+    out = mmes(
+        Y=y,
+        X=X,
+        Z=[Z],
+        K=[np.eye(n_groups)],
+        method="ai_mme_sp",
+        iters=40,
+    )
+
+    assert np.all(np.asarray(out["theta"]) > 0)
+    assert out["beta"].shape == (1, 1)
+    assert len(out["u"]) == 1
+    assert out["fitted"].shape == y.shape
+
+
+def test_formula_api_with_ism_and_dsm():
+    rng = np.random.default_rng(202)
+    n_groups = 8
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+    env = np.tile(np.array(["E1", "E2"]), n_groups * reps // 2)
+    n = group.size
+
+    Z = np.eye(n_groups)[group]
+    u = rng.normal(0, 0.8, size=(n_groups, 1))
+    y = 2.0 + Z @ u + rng.normal(0, 0.3, size=(n, 1))
+
+    data = {
+        "y": y.ravel(),
+        "group": group,
+        "env": env,
+    }
+
+    out1 = mmes_formula(
+        fixed="y ~ 1",
+        random=[vsm(ism("group"))],
+        data=data,
+        iters=30,
+    )
+    assert "random_names" in out1
+    assert len(out1["u"]) == 1
+
+    out2 = mmes_formula(
+        fixed="y ~ 1",
+        random=[vsm(dsm("env"), ism("group"))],
+        data=data,
+        iters=30,
+    )
+    assert len(out2["u"]) == 2
+
+
+def test_mmes_accepts_formula_like_arguments_directly():
+    rng = np.random.default_rng(250)
+    n_groups = 10
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+    n = group.size
+
+    z = np.eye(n_groups)[group]
+    y = 1.0 + z @ rng.normal(0, 0.6, size=(n_groups, 1)) + rng.normal(0, 0.2, size=(n, 1))
+    data = {"y": y.ravel(), "group": group}
+
+    out = mmes(
+        fixed="y ~ 1",
+        random=[vsm(ism("group"))],
+        data=data,
+        iters=25,
+    )
+
+    assert "fixed_names" in out
+    assert "random_names" in out
+    assert out["fixed_names"] == ["Intercept"]
+    assert len(out["u"]) == 1
+
+
+def test_mmes_formula_like_matches_mmes_formula_wrapper():
+    rng = np.random.default_rng(251)
+    n_groups = 8
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+    env = np.tile(np.array(["E1", "E2"]), n_groups * reps // 2)
+    n = group.size
+
+    z = np.eye(n_groups)[group]
+    y = 1.8 + z @ rng.normal(0, 0.7, size=(n_groups, 1)) + rng.normal(0, 0.25, size=(n, 1))
+    data = {"y": y.ravel(), "group": group, "env": env}
+    random = [vsm(dsm("env"), ism("group"))]
+
+    out_direct = mmes(
+        fixed="y ~ 1",
+        random=random,
+        data=data,
+        iters=20,
+    )
+    out_wrapper = mmes_formula(
+        fixed="y ~ 1",
+        random=random,
+        data=data,
+        iters=20,
+    )
+
+    assert out_direct["random_names"] == out_wrapper["random_names"]
+    assert out_direct["fixed_names"] == out_wrapper["fixed_names"]
+    np.testing.assert_allclose(out_direct["theta"], out_wrapper["theta"], atol=1e-8, rtol=1e-8)
+
+
+def test_gwas_helpers_shapes_and_finite():
+    rng = np.random.default_rng(303)
+    n = 20
+    m = 6
+
+    M = rng.choice([-1.0, 0.0, 1.0], size=(n, m))
+    X = np.ones((n, 1), dtype=float)
+    Z = np.eye(n)
+    y = rng.normal(0.0, 1.0, size=(n, 1))
+    Vinv = np.eye(n)
+
+    out = gwasForLoop(M=M, Y=y, Z=Z, X=X, Vinv=Vinv, min_maf=0.0)
+    assert out.shape == (m, 1, 3)
+    assert np.isfinite(out).all()
+
+    d_nt = np.eye(1)
+    mimv = np.kron(d_nt, M[:, [0]])
+    ymv = y
+    zmv = Z
+    xmv = X
+    sc = scorecalc(mimv, ymv, zmv, xmv, Vinv, nt=1, min_maf=0.0)
+    assert sc.shape == (1, 1, 3)
+    assert np.isfinite(sc).all()
 
 
 def test_reference_covariance_if_available():

@@ -115,16 +115,16 @@ print("beta:", fit["beta"].ravel())
 yhat = X @ fit["beta"] + Z_id @ fit["u"][0]
 ```
 
-## ToDo
+## Next steps
 
 The following major pieces are still pending:
 
-1. Add a high-level API closer to R `sommer` style (`mmes`/`vsm` formula-like interface) instead of matrix-only inputs.
-2. Implement the second REML solver path (`ai_mme_sp` / Henderson-based AI) in Python.
-3. Extend solver coverage for broader multivariate and advanced covariance structures beyond the current first-pass univariate core.
-4. Add GWAS helper translations (`scorecalc`, `gwasForLoop`) and tests.
-5. Expand cross-language validation with more real datasets and edge-case regression tests.
-6. Improve user-facing docs with more end-to-end examples (multiple random terms, custom relationship matrices, prediction workflows).
+1. [x] Add a high-level API closer to R `sommer` style (`mmes`/`vsm` formula-like interface) instead of matrix-only inputs.
+2. [ ] Implement the second REML solver path (`ai_mme_sp` / Henderson-based AI) in Python.
+3. [ ] Extend solver coverage for broader multivariate and advanced covariance structures beyond the current first-pass univariate core.
+4. [ ] Add GWAS helper translations (`scorecalc`, `gwasForLoop`) and tests.
+5. [ ] Expand cross-language validation with more real datasets and edge-case regression tests.
+6. [ ] Improve user-facing docs with more end-to-end examples (multiple random terms, custom relationship matrices, prediction workflows).
 
 ## Use In Jupyter Notebook
 

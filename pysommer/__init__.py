@@ -1,10 +1,12 @@
 """pysommer: Python translation of sommer computational core (Phase 1)."""
 
 from .covariance import AR1, ARMA, CS
-from .mmes import mmes
+from .formula import dsm, ism, usm, vsm
+from .gwas import gwasForLoop, scorecalc
+from .mmes import mmes, mmes_formula
 from .nearPD import nearPD, near_pd
 from .relationships import A_mat, D_mat, E_mat, H_mat
-from .solver import SolverResult, newton_di_sp
+from .solver import SolverResult, ai_mme_sp, newton_di_sp
 from .utils import (
     is_diagonal_mat,
     is_identity_mat,
@@ -25,16 +27,24 @@ __all__ = [
     "E_mat",
     "H_mat",
     "SolverResult",
+    "ai_mme_sp",
+    "dsm",
+    "gwasForLoop",
     "is_diagonal_mat",
     "is_identity_mat",
+    "ism",
     "make_full",
     "mat_to_vec_cpp",
     "mmes",
+    "mmes_formula",
     "nearPD",
     "near_pd",
     "newton_di_sp",
     "scale_cpp",
+    "scorecalc",
     "seq_cpp",
+    "usm",
     "var_cols",
     "vec_to_mat_cpp",
+    "vsm",
 ]

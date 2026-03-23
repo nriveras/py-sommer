@@ -1,15 +1,16 @@
-"""Simplified matrix-based mmes wrapper (Phase 1)."""
+"""Matrix-based and formula-like mmes wrappers."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Mapping, Sequence
 
 import numpy as np
 
-from .solver import newton_di_sp
+from .formula import VSMCall, build_random_from_vsm, parse_fixed_formula
+from .solver import ai_mme_sp, newton_di_sp
 
 
-def mmes(
+def _run_mmes_matrix_core(
     Y: np.ndarray,
     X: np.ndarray,
     Z: Sequence[np.ndarray],
@@ -24,28 +25,44 @@ def mmes(
     stepweight: np.ndarray | None = None,
     emweight: np.ndarray | None = None,
     theta_init: np.ndarray | None = None,
+    method: str = "newton_di_sp",
 ) -> Dict[str, Any]:
-    """Fit a univariate mixed model using explicit matrices.
-
-    This intentionally avoids R-style formula parsing and focuses on the
-    computational core.
-    """
-    fit = newton_di_sp(
-        Y=Y,
-        X=X,
-        Z=Z,
-        K=K,
-        R=R,
-        theta_init=theta_init,
-        iters=iters,
-        tolpar=tolpar,
-        tolparinv=tolparinv,
-        ai=ai,
-        pev=pev,
-        verbose=verbose,
-        stepweight=stepweight,
-        emweight=emweight,
-    )
+    """Shared computational backend for matrix-based mmes calls."""
+    if method == "newton_di_sp":
+        fit = newton_di_sp(
+            Y=Y,
+            X=X,
+            Z=Z,
+            K=K,
+            R=R,
+            theta_init=theta_init,
+            iters=iters,
+            tolpar=tolpar,
+            tolparinv=tolparinv,
+            ai=ai,
+            pev=pev,
+            verbose=verbose,
+            stepweight=stepweight,
+            emweight=emweight,
+        )
+    elif method == "ai_mme_sp":
+        fit = ai_mme_sp(
+            Y=Y,
+            X=X,
+            Z=Z,
+            K=K,
+            R=R,
+            theta_init=theta_init,
+            iters=iters,
+            tolpar=tolpar,
+            tolparinv=tolparinv,
+            pev=pev,
+            verbose=verbose,
+            stepweight=stepweight,
+            emweight=emweight,
+        )
+    else:
+        raise ValueError("method must be one of: 'newton_di_sp', 'ai_mme_sp'")
 
     return {
         "beta": fit.beta,
@@ -58,3 +75,131 @@ def mmes(
         "residuals": fit.residuals,
         "pevs": fit.pevs,
     }
+
+
+def _normalize_random(random: Sequence[VSMCall] | VSMCall | None) -> list[VSMCall]:
+    if random is None:
+        return []
+    if isinstance(random, VSMCall):
+        return [random]
+    return list(random)
+
+
+def mmes(
+    Y: np.ndarray | None = None,
+    X: np.ndarray | None = None,
+    Z: Sequence[np.ndarray] | None = None,
+    K: Sequence[np.ndarray] | None = None,
+    R: np.ndarray | None = None,
+    iters: int = 50,
+    tolpar: float = 1e-6,
+    tolparinv: float = 1e-6,
+    ai: bool = True,
+    pev: bool = True,
+    verbose: bool = False,
+    stepweight: np.ndarray | None = None,
+    emweight: np.ndarray | None = None,
+    theta_init: np.ndarray | None = None,
+    method: str = "newton_di_sp",
+    fixed: str | None = None,
+    random: Sequence[VSMCall] | VSMCall | None = None,
+    data: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Fit a mixed model using matrix inputs or a lightweight formula interface.
+
+    Matrix mode:
+    - Provide `Y`, `X`, `Z`, `K`.
+
+    Formula-like mode (R-sommer style wrapper):
+    - Provide `fixed`, `random`, `data` where `random` is built with `vsm(...)`.
+    """
+    formula_mode = fixed is not None or data is not None or random is not None
+
+    if formula_mode:
+        if fixed is None or data is None:
+            raise ValueError("Formula-like mode requires 'fixed' and 'data'")
+        return mmes_formula(
+            fixed=fixed,
+            random=_normalize_random(random),
+            data=data,
+            R=R,
+            iters=iters,
+            tolpar=tolpar,
+            tolparinv=tolparinv,
+            ai=ai,
+            pev=pev,
+            verbose=verbose,
+            stepweight=stepweight,
+            emweight=emweight,
+            theta_init=theta_init,
+            method=method,
+        )
+
+    if Y is None or X is None or Z is None or K is None:
+        raise ValueError("Matrix mode requires Y, X, Z, and K")
+
+    return _run_mmes_matrix_core(
+        Y=Y,
+        X=X,
+        Z=Z,
+        K=K,
+        R=R,
+        iters=iters,
+        tolpar=tolpar,
+        tolparinv=tolparinv,
+        ai=ai,
+        pev=pev,
+        verbose=verbose,
+        stepweight=stepweight,
+        emweight=emweight,
+        theta_init=theta_init,
+        method=method,
+    )
+
+
+def mmes_formula(
+    fixed: str,
+    random: Sequence[VSMCall] | VSMCall,
+    data: Mapping[str, Any],
+    R: np.ndarray | None = None,
+    iters: int = 50,
+    tolpar: float = 1e-6,
+    tolparinv: float = 1e-6,
+    ai: bool = True,
+    pev: bool = True,
+    verbose: bool = False,
+    stepweight: np.ndarray | None = None,
+    emweight: np.ndarray | None = None,
+    theta_init: np.ndarray | None = None,
+    method: str = "newton_di_sp",
+) -> Dict[str, Any]:
+    """Fit mmes from a lightweight formula-like interface.
+
+    Supported random declarations:
+    - vsm(ism(group), Gu=K)
+    - vsm(dsm(env), ism(group), Gu=K)
+    """
+    random_terms = _normalize_random(random)
+    y, x, fixed_names = parse_fixed_formula(fixed=fixed, data=data)
+    z_terms, k_terms, random_names = build_random_from_vsm(random=random_terms, data=data)
+
+    out = _run_mmes_matrix_core(
+        Y=y,
+        X=x,
+        Z=z_terms,
+        K=k_terms,
+        R=R,
+        iters=iters,
+        tolpar=tolpar,
+        tolparinv=tolparinv,
+        ai=ai,
+        pev=pev,
+        verbose=verbose,
+        stepweight=stepweight,
+        emweight=emweight,
+        theta_init=theta_init,
+        method=method,
+    )
+    out["fixed_names"] = fixed_names
+    out["random_names"] = random_names
+    return out
