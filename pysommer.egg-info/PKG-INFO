@@ -1,3 +1,12 @@
+Metadata-Version: 2.4
+Name: pysommer
+Version: 0.1.0
+Summary: Python translation of core computational routines from sommer
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.23
+Requires-Dist: scipy>=1.10
+
 # py-sommer: Python Translation of sommer Core
 
 This repository contains a Python translation of core computational components from the R package sommer.
@@ -76,8 +85,7 @@ uv sync --dev
 ### 2. Install a Jupyter kernel backed by this project environment
 
 ```bash
-uv run jupyter kernelspec remove py-sommer -f || true
-uv run python -m ipykernel install --user --name py-sommer --display-name "Python (py-sommer)"
+uv run python -m ipykernel install --user --name py-sommer --display-name "Python (py-sommer)" --force
 ```
 
 ### 3. Start Jupyter from the project environment
