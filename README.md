@@ -259,6 +259,43 @@ print("random terms:", fit_usm["random_names"])
 print("u shape:", fit_usm["u"][0].shape)
 ```
 
+## Example: GWAS helpers (`scorecalc`, `gwasForLoop`)
+
+Step 4 adds direct Python translations of the sommer GWAS helper routines.
+
+```python
+import numpy as np
+from pysommer import gwasForLoop, scorecalc
+
+rng = np.random.default_rng(1701)
+n = 24
+n_levels = 8
+n_traits = 2
+n_markers = 5
+
+group = np.repeat(np.arange(n_levels), n // n_levels)
+Z = np.eye(n_levels)[group]
+X = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+M = rng.choice([-1.0, 0.0, 1.0], size=(n_levels, n_markers))
+Y = rng.normal(0.0, 1.0, size=(n, n_traits))
+Vinv = np.eye(n * n_traits)
+
+# Marker-by-marker GWAS helper (markers x traits x [score, effect, se])
+out = gwasForLoop(M=M, Y=Y, Z=Z, X=X, Vinv=Vinv, min_maf=0.0)
+print("gwas output shape:", out.shape)
+
+# Direct scorecalc call for marker 1 in multivariate form
+D = np.eye(n_traits)
+Ymv = Y.T.reshape(-1, 1, order="F")
+Zmv = np.kron(Z, D)
+Xmv = np.kron(X, D)
+Mimv = np.kron(M[:, [0]], D)
+score_marker1 = scorecalc(Mimv=Mimv, Ymv=Ymv, Zmv=Zmv, Xmv=Xmv, Vinv=Vinv, nt=n_traits)
+print("scorecalc marker shape:", score_marker1.shape)
+```
+
+For a complete Python-vs-R sommer parity check of these helper outputs, see the GWAS comparison section in [notebooks/compare_r_python_predictions.ipynb](notebooks/compare_r_python_predictions.ipynb).
+
 ## Next steps
 
 The following major pieces are still pending:
@@ -266,7 +303,7 @@ The following major pieces are still pending:
 1. [x] Add a high-level API closer to R `sommer` style (`mmes`/`vsm` formula-like interface) instead of matrix-only inputs.
 2. [x] Implement the second REML solver path (`ai_mme_sp` / Henderson-based AI) in Python.
 3. [x] Extend solver coverage for broader multivariate and advanced covariance structures beyond the current first-pass univariate core.
-4. [ ] Add GWAS helper translations (`scorecalc`, `gwasForLoop`) and tests.
+4. [x] Add GWAS helper translations (`scorecalc`, `gwasForLoop`) and tests.
 5. [ ] Expand cross-language validation with more real datasets and edge-case regression tests.
 6. [ ] Improve user-facing docs with more end-to-end examples (multiple random terms, custom relationship matrices, prediction workflows).
 

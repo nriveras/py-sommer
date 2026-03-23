@@ -377,7 +377,7 @@ def test_mmes_formula_like_matches_mmes_formula_wrapper():
     np.testing.assert_allclose(out_direct["theta"], out_wrapper["theta"], atol=1e-8, rtol=1e-8)
 
 
-def test_gwas_helpers_shapes_and_finite():
+def test_gwas_helpers_shapes_and_finite_univariate():
     rng = np.random.default_rng(303)
     n = 20
     m = 6
@@ -392,14 +392,76 @@ def test_gwas_helpers_shapes_and_finite():
     assert out.shape == (m, 1, 3)
     assert np.isfinite(out).all()
 
-    d_nt = np.eye(1)
-    mimv = np.kron(d_nt, M[:, [0]])
-    ymv = y
-    zmv = Z
-    xmv = X
-    sc = scorecalc(mimv, ymv, zmv, xmv, Vinv, nt=1, min_maf=0.0)
+    sc = scorecalc(Mimv=M[:, [0]], Ymv=y, Zmv=Z, Xmv=X, Vinv=Vinv, nt=1, min_maf=0.0)
     assert sc.shape == (1, 1, 3)
     assert np.isfinite(sc).all()
+
+
+def test_gwas_multivariate_matches_markerwise_scorecalc():
+    rng = np.random.default_rng(304)
+    n = 30
+    n_levels = 10
+    m = 4
+    nt = 2
+
+    group = np.repeat(np.arange(n_levels), n // n_levels)
+    Z = np.eye(n_levels)[group]
+    X = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+
+    M = rng.choice([-1.0, 0.0, 1.0], size=(n_levels, m))
+    Y = rng.normal(0.0, 1.0, size=(n, nt))
+    Vinv = np.eye(n * nt)
+
+    out = gwasForLoop(M=M, Y=Y, Z=Z, X=X, Vinv=Vinv, min_maf=0.0)
+    assert out.shape == (m, nt, 3)
+    assert np.isfinite(out).all()
+
+    d_nt = np.eye(nt, dtype=float)
+    y_mv = Y.T.reshape(-1, 1, order="F")
+    z_mv = np.kron(Z, d_nt)
+    x_mv = np.kron(X, d_nt)
+
+    expected = np.zeros_like(out)
+    for i in range(m):
+        mi_mv = np.kron(M[:, [i]], d_nt)
+        sc_i = scorecalc(
+            Mimv=mi_mv,
+            Ymv=y_mv,
+            Zmv=z_mv,
+            Xmv=x_mv,
+            Vinv=Vinv,
+            nt=nt,
+            min_maf=0.0,
+        )
+        expected[i, :, :] = sc_i[0, :, :]
+
+    np.testing.assert_allclose(out, expected, atol=1e-10, rtol=1e-10)
+
+
+def test_gwas_min_maf_filters_low_frequency_markers():
+    rng = np.random.default_rng(305)
+    n = 16
+    m = 3
+
+    Z = np.eye(n)
+    X = np.ones((n, 1), dtype=float)
+    Y = rng.normal(0.0, 1.0, size=(n, 1))
+    Vinv = np.eye(n)
+
+    # Marker 0 is monomorphic at -1 coding -> MAF 0; others are polymorphic.
+    M = np.column_stack(
+        [
+            -np.ones(n),
+            np.tile(np.array([-1.0, 1.0]), n // 2),
+            np.tile(np.array([-1.0, 0.0, 1.0, 0.0]), n // 4),
+        ]
+    )
+
+    out = gwasForLoop(M=M, Y=Y, Z=Z, X=X, Vinv=Vinv, min_maf=0.05)
+
+    assert np.allclose(out[0, :, :], 0.0)
+    assert np.isfinite(out[1:, :, :]).all()
+    assert not np.allclose(out[1, :, :], 0.0)
 
 
 def test_reference_covariance_if_available():
