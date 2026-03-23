@@ -190,13 +190,82 @@ print("theta:", np.asarray(fit_henderson["theta"]).round(6))
 print("beta:", np.asarray(fit_henderson["beta"]).ravel().round(6))
 ```
 
+## Example: Multivariate solver coverage (independent-trait mode)
+
+Step 3 adds broader multivariate coverage by allowing `Y` to have multiple columns.
+The current implementation fits each trait with shared model terms and returns
+stacked outputs (`beta`, `theta`, `u`, `fitted`, `residuals`).
+
+```python
+import numpy as np
+from pysommer import mmes
+
+rng = np.random.default_rng(1301)
+n_groups = 10
+reps = 3
+group = np.repeat(np.arange(n_groups), reps)
+n = group.size
+
+Z = np.eye(n_groups)[group]
+X = np.ones((n, 1), dtype=float)
+K = np.eye(n_groups, dtype=float)
+
+y1 = 1.0 + Z @ rng.normal(0.0, np.sqrt(0.7), size=(n_groups, 1)) + rng.normal(0.0, np.sqrt(0.3), size=(n, 1))
+y2 = 2.0 + Z @ rng.normal(0.0, np.sqrt(1.1), size=(n_groups, 1)) + rng.normal(0.0, np.sqrt(0.4), size=(n, 1))
+Y = np.hstack([y1, y2])
+
+fit_mv = mmes(Y=Y, X=X, Z=[Z], K=[K], iters=50)
+
+print("beta shape:", fit_mv["beta"].shape)      # (p, n_traits)
+print("theta shape:", fit_mv["theta"].shape)    # (n_vc, n_traits)
+print("u[0] shape:", fit_mv["u"][0].shape)      # (n_levels, n_traits)
+```
+
+## Example: Advanced covariance structure in formula mode (`usm` + `Cu`)
+
+Step 3 also adds an advanced covariance declaration in formula mode:
+`vsm(usm(env), ism(group), Cu=...)`.
+
+`Cu` is a known covariance matrix across levels of the `usm(...)` factor and
+is combined with `Gu` (or identity if omitted) through a Kronecker product.
+
+```python
+import numpy as np
+from pysommer import AR1, mmes, vsm, usm, ism
+
+rng = np.random.default_rng(1303)
+n_groups = 8
+reps = 4
+group = np.repeat(np.arange(n_groups), reps)
+env = np.tile(np.array(["E1", "E2"]), group.size // 2)
+
+Z = np.eye(n_groups)[group]
+y = 1.8 + Z @ rng.normal(0.0, 0.7, size=(n_groups, 1)) + rng.normal(0.0, 0.25, size=(group.size, 1))
+
+data = {
+	"y": y.ravel(),
+	"group": group,
+	"env": env,
+}
+
+fit_usm = mmes(
+	fixed="y ~ 1",
+	random=[vsm(usm("env"), ism("group"), Cu=AR1(2, rho=0.35))],
+	data=data,
+	iters=35,
+)
+
+print("random terms:", fit_usm["random_names"])
+print("u shape:", fit_usm["u"][0].shape)
+```
+
 ## Next steps
 
 The following major pieces are still pending:
 
 1. [x] Add a high-level API closer to R `sommer` style (`mmes`/`vsm` formula-like interface) instead of matrix-only inputs.
 2. [x] Implement the second REML solver path (`ai_mme_sp` / Henderson-based AI) in Python.
-3. [ ] Extend solver coverage for broader multivariate and advanced covariance structures beyond the current first-pass univariate core.
+3. [x] Extend solver coverage for broader multivariate and advanced covariance structures beyond the current first-pass univariate core.
 4. [ ] Add GWAS helper translations (`scorecalc`, `gwasForLoop`) and tests.
 5. [ ] Expand cross-language validation with more real datasets and edge-case regression tests.
 6. [ ] Improve user-facing docs with more end-to-end examples (multiple random terms, custom relationship matrices, prediction workflows).

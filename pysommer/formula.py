@@ -39,6 +39,7 @@ class VSMCall:
 
     structures: tuple[Any, ...]
     Gu: np.ndarray | None = None
+    Cu: np.ndarray | None = None
 
 
 def ism(var: str) -> ISM:
@@ -53,8 +54,8 @@ def usm(var: str) -> USM:
     return USM(var=var)
 
 
-def vsm(*structures: Any, Gu: np.ndarray | None = None) -> VSMCall:
-    return VSMCall(structures=tuple(structures), Gu=Gu)
+def vsm(*structures: Any, Gu: np.ndarray | None = None, Cu: np.ndarray | None = None) -> VSMCall:
+    return VSMCall(structures=tuple(structures), Gu=Gu, Cu=Cu)
 
 
 def _fetch_col(data: Mapping[str, Any], key: str) -> np.ndarray:
@@ -87,8 +88,17 @@ def parse_fixed_formula(fixed: str, data: Mapping[str, Any]) -> tuple[np.ndarray
         raise ValueError("fixed must have form 'response ~ terms'")
 
     lhs, rhs = [p.strip() for p in fixed.split("~", 1)]
-    y = _fetch_col(data, lhs).astype(float).reshape(-1, 1)
-    n = y.shape[0]
+
+    lhs_terms = [t.strip() for t in lhs.split("+") if t.strip()]
+    if len(lhs_terms) == 0:
+        raise ValueError("fixed must include at least one response on the left-hand side")
+
+    y_cols = [_fetch_col(data, name).astype(float).reshape(-1, 1) for name in lhs_terms]
+    n = y_cols[0].shape[0]
+    for col in y_cols:
+        if col.shape[0] != n:
+            raise ValueError("All response columns must have the same number of rows")
+    y = np.hstack(y_cols)
 
     rhs_terms = [t.strip() for t in rhs.split("+") if t.strip()]
     if len(rhs_terms) == 0:
@@ -142,6 +152,7 @@ def build_random_from_vsm(
     Implemented patterns:
     - vsm(ism(group), Gu=K)
     - vsm(dsm(env), ism(group), Gu=K)
+    - vsm(usm(env), ism(group), Gu=K, Cu=C)
     """
     z_terms: list[np.ndarray] = []
     k_terms: list[np.ndarray] = []
@@ -188,14 +199,46 @@ def build_random_from_vsm(
                 names.append(f"dsm({structures[0].var}={lev})xism({structures[1].var})")
             continue
 
-        # Usm placeholder for future extension.
-        if any(isinstance(s, USM) for s in structures):
-            raise NotImplementedError(
-                "usm() parsing is not implemented yet in formula interface"
-            )
+        if (
+            len(structures) == 2
+            and isinstance(structures[0], USM)
+            and isinstance(structures[1], ISM)
+        ):
+            env = _fetch_col(data, structures[0].var)
+            grp = _fetch_col(data, structures[1].var)
+
+            z_base, grp_levels = _encode_categorical(grp, drop_first=False)
+            env_levels, env_inv = np.unique(env, return_inverse=True)
+
+            gu = call.Gu if call.Gu is not None else np.eye(grp_levels.size, dtype=float)
+            gu = np.asarray(gu, dtype=float)
+            if gu.shape != (grp_levels.size, grp_levels.size):
+                raise ValueError(
+                    f"Gu for {structures[1].var} must be square with size {grp_levels.size}"
+                )
+
+            cu = call.Cu if call.Cu is not None else np.eye(env_levels.size, dtype=float)
+            cu = np.asarray(cu, dtype=float)
+            if cu.shape != (env_levels.size, env_levels.size):
+                raise ValueError(
+                    f"Cu for {structures[0].var} must be square with size {env_levels.size}"
+                )
+
+            z_blocks = []
+            for idx in range(env_levels.size):
+                mask = (env_inv == idx).astype(float)[:, None]
+                z_blocks.append(mask * z_base)
+
+            z_combined = np.hstack(z_blocks)
+            k_combined = np.kron(cu, gu)
+
+            z_terms.append(z_combined)
+            k_terms.append(k_combined)
+            names.append(f"usm({structures[0].var})xism({structures[1].var})")
+            continue
 
         raise NotImplementedError(
-            "Unsupported random structure. Supported: vsm(ism(...)) and vsm(dsm(...), ism(...))"
+            "Unsupported random structure. Supported: vsm(ism(...)), vsm(dsm(...), ism(...)), vsm(usm(...), ism(...))"
         )
 
     return z_terms, k_terms, names

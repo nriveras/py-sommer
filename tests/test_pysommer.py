@@ -21,6 +21,7 @@ from pysommer import (
     scale_cpp,
     scorecalc,
     seq_cpp,
+    usm,
     var_cols,
     vec_to_mat_cpp,
     vsm,
@@ -207,6 +208,82 @@ def test_formula_mode_ai_mme_sp_solver_path():
     assert len(out["u"]) == 1
     assert out["beta"].shape == (1, 1)
     assert np.all(np.asarray(out["theta"]) > 0)
+
+
+def test_matrix_mode_multivariate_independent_traits():
+    rng = np.random.default_rng(1301)
+    n_groups = 10
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+    n = group.size
+
+    z = np.eye(n_groups)[group]
+    x = np.ones((n, 1), dtype=float)
+    k = np.eye(n_groups, dtype=float)
+
+    u1 = rng.normal(0.0, np.sqrt(0.7), size=(n_groups, 1))
+    u2 = rng.normal(0.0, np.sqrt(1.1), size=(n_groups, 1))
+    e1 = rng.normal(0.0, np.sqrt(0.3), size=(n, 1))
+    e2 = rng.normal(0.0, np.sqrt(0.4), size=(n, 1))
+    y = np.hstack([1.0 + z @ u1 + e1, 2.0 + z @ u2 + e2])
+
+    out = mmes(Y=y, X=x, Z=[z], K=[k], iters=50)
+
+    assert out["beta"].shape == (1, 2)
+    assert out["theta"].shape == (2, 2)
+    assert out["fitted"].shape == y.shape
+    assert out["residuals"].shape == y.shape
+    assert len(out["u"]) == 1
+    assert out["u"][0].shape == (n_groups, 2)
+
+
+def test_formula_mode_multivariate_independent_traits():
+    rng = np.random.default_rng(1302)
+    n_groups = 9
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+    z = np.eye(n_groups)[group]
+
+    y1 = 1.5 + z @ rng.normal(0.0, 0.8, size=(n_groups, 1)) + rng.normal(0.0, 0.3, size=(group.size, 1))
+    y2 = 0.5 + z @ rng.normal(0.0, 0.6, size=(n_groups, 1)) + rng.normal(0.0, 0.35, size=(group.size, 1))
+    data = {"y1": y1.ravel(), "y2": y2.ravel(), "group": group}
+
+    out = mmes(
+        fixed="y1 + y2 ~ 1",
+        random=[vsm(ism("group"))],
+        data=data,
+        iters=40,
+    )
+
+    assert out["beta"].shape == (1, 2)
+    assert out["fitted"].shape == (group.size, 2)
+    assert out["fixed_names"] == ["Intercept"]
+    assert len(out["u"]) == 1
+    assert out["u"][0].shape == (n_groups, 2)
+
+
+def test_formula_usm_with_custom_covariance_runs():
+    rng = np.random.default_rng(1303)
+    n_groups = 8
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+    env = np.tile(np.array(["E1", "E2"]), group.size // 2)
+
+    z = np.eye(n_groups)[group]
+    y = 1.8 + z @ rng.normal(0.0, 0.7, size=(n_groups, 1)) + rng.normal(0.0, 0.25, size=(group.size, 1))
+    data = {"y": y.ravel(), "group": group, "env": env}
+    cu = AR1(2, rho=0.35)
+
+    out = mmes_formula(
+        fixed="y ~ 1",
+        random=[vsm(usm("env"), ism("group"), Cu=cu)],
+        data=data,
+        iters=35,
+    )
+
+    assert len(out["u"]) == 1
+    assert out["u"][0].shape == (n_groups * 2, 1)
+    assert "usm(env)xism(group)" in out["random_names"]
 
 
 def test_formula_api_with_ism_and_dsm():

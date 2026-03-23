@@ -77,6 +77,104 @@ def _run_mmes_matrix_core(
     }
 
 
+def _run_mmes_matrix_dispatch(
+    Y: np.ndarray,
+    X: np.ndarray,
+    Z: Sequence[np.ndarray],
+    K: Sequence[np.ndarray],
+    R: np.ndarray | None = None,
+    iters: int = 50,
+    tolpar: float = 1e-6,
+    tolparinv: float = 1e-6,
+    ai: bool = True,
+    pev: bool = True,
+    verbose: bool = False,
+    stepweight: np.ndarray | None = None,
+    emweight: np.ndarray | None = None,
+    theta_init: np.ndarray | None = None,
+    method: str = "newton_di_sp",
+) -> Dict[str, Any]:
+    """Dispatch matrix mode to univariate core or independent-trait multivariate path."""
+    y_arr = np.asarray(Y, dtype=float)
+
+    # Univariate route.
+    if y_arr.ndim == 1 or (y_arr.ndim == 2 and y_arr.shape[1] == 1):
+        return _run_mmes_matrix_core(
+            Y=y_arr,
+            X=X,
+            Z=Z,
+            K=K,
+            R=R,
+            iters=iters,
+            tolpar=tolpar,
+            tolparinv=tolparinv,
+            ai=ai,
+            pev=pev,
+            verbose=verbose,
+            stepweight=stepweight,
+            emweight=emweight,
+            theta_init=theta_init,
+            method=method,
+        )
+
+    # Independent-trait multivariate route: solve one trait at a time with shared model terms.
+    if y_arr.ndim != 2:
+        raise ValueError("Y must be 1D or 2D array")
+
+    n_traits = y_arr.shape[1]
+    trait_fits: list[dict[str, Any]] = []
+    for j in range(n_traits):
+        yj = y_arr[:, j : j + 1]
+        fit_j = _run_mmes_matrix_core(
+            Y=yj,
+            X=X,
+            Z=Z,
+            K=K,
+            R=R,
+            iters=iters,
+            tolpar=tolpar,
+            tolparinv=tolparinv,
+            ai=ai,
+            pev=pev,
+            verbose=verbose,
+            stepweight=stepweight,
+            emweight=emweight,
+            theta_init=theta_init,
+            method=method,
+        )
+        trait_fits.append(fit_j)
+
+    beta = np.hstack([f["beta"] for f in trait_fits])
+    theta = np.column_stack([np.asarray(f["theta"]).reshape(-1) for f in trait_fits])
+    fitted = np.hstack([f["fitted"] for f in trait_fits])
+    residuals = np.hstack([f["residuals"] for f in trait_fits])
+    u = [np.hstack([f["u"][i] for f in trait_fits]) for i in range(len(trait_fits[0]["u"]))]
+
+    # Preserve per-trait likelihood/iterations while exposing an aggregate summary.
+    loglik = np.asarray([f["logLik"] for f in trait_fits], dtype=float)
+    iterations = np.asarray([f["iterations"] for f in trait_fits], dtype=int)
+    converged = bool(all(bool(f["converged"]) for f in trait_fits))
+
+    pevs = []
+    for i in range(len(trait_fits[0]["pevs"])):
+        pevs_i = [np.asarray(f["pevs"][i]) for f in trait_fits]
+        pevs.append(np.stack(pevs_i, axis=2))
+
+    return {
+        "beta": beta,
+        "u": u,
+        "theta": theta,
+        "logLik": loglik,
+        "converged": converged,
+        "iterations": iterations,
+        "fitted": fitted,
+        "residuals": residuals,
+        "pevs": pevs,
+        "trait_fits": trait_fits,
+        "multivariate_mode": "independent",
+    }
+
+
 def _normalize_random(random: Sequence[VSMCall] | VSMCall | None) -> list[VSMCall]:
     if random is None:
         return []
@@ -138,7 +236,7 @@ def mmes(
     if Y is None or X is None or Z is None or K is None:
         raise ValueError("Matrix mode requires Y, X, Z, and K")
 
-    return _run_mmes_matrix_core(
+    return _run_mmes_matrix_dispatch(
         Y=Y,
         X=X,
         Z=Z,
@@ -183,7 +281,7 @@ def mmes_formula(
     y, x, fixed_names = parse_fixed_formula(fixed=fixed, data=data)
     z_terms, k_terms, random_names = build_random_from_vsm(random=random_terms, data=data)
 
-    out = _run_mmes_matrix_core(
+    out = _run_mmes_matrix_dispatch(
         Y=y,
         X=x,
         Z=z_terms,
