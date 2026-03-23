@@ -77,7 +77,7 @@ uv run pytest tests/test_pysommer.py -q
 
 ## Python Model Setup Example
 
-`pysommer.mmes` currently works with explicit matrices (not formula strings).
+`pysommer.mmes` supports both explicit matrix input and a lightweight formula-like interface.
 
 ```python
 import numpy as np
@@ -113,6 +113,81 @@ print("beta:", fit["beta"].ravel())
 
 # Predicted values (fixed + random)
 yhat = X @ fit["beta"] + Z_id @ fit["u"][0]
+```
+
+## Example: Formula-like API (`vsm` / `ism` / `dsm`)
+
+This is the high-level interface added in Next step 1.
+
+```python
+import numpy as np
+from pysommer import mmes, vsm, ism, dsm
+
+rng = np.random.default_rng(202)
+n_groups = 8
+reps = 4
+group = np.repeat(np.arange(n_groups), reps)
+env = np.tile(np.array(["E1", "E2"]), n_groups * reps // 2)
+
+Z = np.eye(n_groups)[group]
+y = 2.0 + Z @ rng.normal(0, 0.8, size=(n_groups, 1)) + rng.normal(0, 0.3, size=(group.size, 1))
+
+data = {
+	"y": y.ravel(),
+	"group": group,
+	"env": env,
+}
+
+# Random intercept by group
+fit_ism = mmes(
+	fixed="y ~ 1",
+	random=[vsm(ism("group"))],
+	data=data,
+	iters=40,
+)
+
+# Environment-specific group effects via diagonal-by-level structure
+fit_dsm = mmes(
+	fixed="y ~ 1",
+	random=[vsm(dsm("env"), ism("group"))],
+	data=data,
+	iters=40,
+)
+
+print("ISM random terms:", fit_ism["random_names"])
+print("DSM random terms:", fit_dsm["random_names"])
+```
+
+## Example: Henderson-style AI solver (`ai_mme_sp`)
+
+This is the second REML path implemented in Next step 2. Use `method="ai_mme_sp"`.
+
+```python
+import numpy as np
+from pysommer import mmes
+
+rng = np.random.default_rng(101)
+n_groups = 16
+reps = 3
+group = np.repeat(np.arange(n_groups), reps)
+n = group.size
+
+Z = np.eye(n_groups)[group]
+X = np.ones((n, 1), dtype=float)
+y = 1.5 + Z @ rng.normal(0, np.sqrt(0.8), size=(n_groups, 1)) + rng.normal(0, np.sqrt(0.5), size=(n, 1))
+
+fit_henderson = mmes(
+	Y=y,
+	X=X,
+	Z=[Z],
+	K=[np.eye(n_groups)],
+	method="ai_mme_sp",
+	iters=50,
+)
+
+print("converged:", fit_henderson["converged"])
+print("theta:", np.asarray(fit_henderson["theta"]).round(6))
+print("beta:", np.asarray(fit_henderson["beta"]).ravel().round(6))
 ```
 
 ## Next steps
