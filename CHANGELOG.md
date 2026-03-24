@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Added notebook examples in `notebooks/start_implementation.ipynb` comparing formula estimator vs functional API, demonstrating sklearn.clone compatibility, and R package comparison framework.
 - Both estimator classes achieve numerical parity with underlying functional APIs (`mmes` and `mmes_formula`).
 - Added documentation and notebook examples for `MMESRegressor` and `MMESFormulaRegressor` usage.
+- Added richer sklearn interoperability examples for pipeline composition and manual KFold/clone cross-validation patterns with mixed-model matrix handling notes.
 - Consolidated completed roadmap milestones from README into changelog-oriented release history.
 
 ## 0.1.0 - 2026-03-24

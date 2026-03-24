@@ -667,10 +667,87 @@ Optional sklearn interoperability dependency:
 uv sync --extra sklearn
 ```
 
+## Example: Richer sklearn Interoperability Patterns (Pipeline + Cross-Validation)
+
+`MMESRegressor` works with sklearn pipelines and cloning utilities.
+
+### Pipeline pattern with `FunctionTransformer`
+
+```python
+import numpy as np
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import FunctionTransformer
+from pysommer import MMESRegressor
+
+rng = np.random.default_rng(7003)
+n_groups = 10
+reps = 4
+group = np.repeat(np.arange(n_groups), reps)
+n = group.size
+
+x = rng.normal(0.0, 1.0, size=n)
+X_raw = x.reshape(-1, 1)
+Z = np.eye(n_groups)[group]
+K = np.eye(n_groups, dtype=float)
+
+y = 1.4 + 0.7 * x[:, None] + Z @ rng.normal(0.0, np.sqrt(0.6), size=(n_groups, 1)) + rng.normal(0.0, np.sqrt(0.3), size=(n, 1))
+
+def add_intercept(x_in):
+	return np.column_stack([np.ones(x_in.shape[0]), x_in])
+
+pipe = Pipeline([
+	("intercept", FunctionTransformer(add_intercept)),
+	("mmes", MMESRegressor(Z=[Z], K=[K], iters=35)),
+])
+
+pipe.fit(X_raw, y)
+print("pipeline score:", pipe.score(X_raw, y))
+```
+
+### Cross-validation pattern with `KFold` + `clone`
+
+```python
+import numpy as np
+from sklearn.base import clone
+from sklearn.model_selection import KFold
+from pysommer import MMESRegressor
+
+rng = np.random.default_rng(7004)
+n_groups = 12
+reps = 5
+group = np.repeat(np.arange(n_groups), reps)
+n = group.size
+
+X = np.ones((n, 1), dtype=float)
+Z = np.eye(n_groups)[group]
+K = np.eye(n_groups, dtype=float)
+y = 2.0 + Z @ rng.normal(0.0, np.sqrt(0.7), size=(n_groups, 1)) + rng.normal(0.0, np.sqrt(0.3), size=(n, 1))
+
+base = MMESRegressor(iters=30)
+kf = KFold(n_splits=3, shuffle=True, random_state=42)
+scores = []
+
+for train_idx, test_idx in kf.split(X):
+	X_train, X_test = X[train_idx], X[test_idx]
+	y_train, y_test = y[train_idx], y[test_idx]
+	Z_train = Z[train_idx, :]
+
+	est = clone(base)
+	est.fit(X_train, y_train, Z=[Z_train], K=[K])
+	scores.append(est.score(X_test, y_test))
+
+print("cv scores:", scores)
+print("mean cv score:", float(np.mean(scores)))
+```
+
+`cross_val_score` is not shown for this mixed-model workflow because each fold
+needs explicit per-fold handling of `Z` rows while maintaining compatible `K`
+dimensions.
+
 ## Next steps
 
 1. [X] Add a formula-mode estimator interface (for `fixed` / `random` / `data`) with sklearn-style methods.
-2. [ ] Add richer sklearn interoperability examples (pipeline and cross-validation patterns) after formula-mode estimator support lands.
+2. [X] Add richer sklearn interoperability examples (pipeline and cross-validation patterns) after formula-mode estimator support lands.
 3. [ ] Expand prediction helpers for out-of-sample random effect handling and uncertainty summaries.
 4. [ ] Publish the next release to TestPyPI, validate install/docs rendering, then publish to PyPI.
 

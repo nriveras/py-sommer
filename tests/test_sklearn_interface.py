@@ -93,6 +93,62 @@ def test_mmes_regressor_with_sklearn_clone_if_available():
     assert est2.coef_.shape == (1, 1)
 
 
+def test_mmes_regressor_pipeline_with_function_transformer_if_available():
+    pipeline_mod = pytest.importorskip("sklearn.pipeline")
+    preprocessing_mod = pytest.importorskip("sklearn.preprocessing")
+
+    rng = np.random.default_rng(1952)
+    n_groups = 10
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+    n = group.size
+
+    x = rng.normal(0.0, 1.0, size=n)
+    x_raw = x.reshape(-1, 1)
+    z = np.eye(n_groups)[group]
+    k = np.eye(n_groups, dtype=float)
+    y = 1.2 + 0.6 * x[:, None] + z @ rng.normal(0.0, np.sqrt(0.5), size=(n_groups, 1)) + rng.normal(0.0, np.sqrt(0.25), size=(n, 1))
+
+    def add_intercept(x_in):
+        return np.column_stack([np.ones(x_in.shape[0]), x_in])
+
+    pipe = pipeline_mod.Pipeline(
+        [
+            ("intercept", preprocessing_mod.FunctionTransformer(add_intercept)),
+            ("mmes", MMESRegressor(Z=[z], K=[k], iters=25)),
+        ]
+    )
+
+    pipe.fit(x_raw, y)
+    y_pred = pipe.predict(x_raw)
+    assert y_pred.shape == y.shape
+    score = pipe.score(x_raw, y)
+    assert np.isfinite(score)
+
+
+def test_mmes_regressor_manual_kfold_clone_if_available():
+    sklearn_base = pytest.importorskip("sklearn.base")
+    model_selection_mod = pytest.importorskip("sklearn.model_selection")
+
+    X, y, Z, K = _make_random_intercept_data(seed=1953)
+
+    base = MMESRegressor(iters=20)
+    kf = model_selection_mod.KFold(n_splits=3, shuffle=True, random_state=42)
+    scores = []
+
+    for train_idx, test_idx in kf.split(X):
+        x_train, x_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        z_train = Z[train_idx, :]
+
+        est = sklearn_base.clone(base)
+        est.fit(x_train, y_train, Z=[z_train], K=[K])
+        scores.append(est.score(x_test, y_test))
+
+    assert len(scores) == 3
+    assert all(np.isfinite(s) for s in scores)
+
+
 def test_mmes_regressor_parity_with_functional_mmes():
     X, y, Z, K = _make_random_intercept_data(seed=1902)
 
