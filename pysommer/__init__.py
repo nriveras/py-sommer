@@ -1,5 +1,7 @@
 """pysommer: Python translation of sommer computational core (Phase 1)."""
 
+__version__ = "0.1.0"
+
 from .covariance import AR1, ARMA, CS
 from .formula import dsm, ism, usm, vsm
 from .gwas import gwasForLoop, scorecalc
@@ -19,6 +21,7 @@ from .utils import (
 )
 
 __all__ = [
+    "__version__",
     "A_mat",
     "AR1",
     "ARMA",
