@@ -565,22 +565,57 @@ for idx in top_lines:
 
 For complete examples with R sommer comparison and detailed output, see [notebooks/compare_r_python_predictions.ipynb](notebooks/compare_r_python_predictions.ipynb).
 
+## Example: Scikit-Learn-like Interface (`MMESRegressor`)
+
+`MMESRegressor` provides a familiar estimator API with `fit`, `predict`, `score`,
+`get_params`, and `set_params` while reusing the same solver backend as `mmes`.
+
+```python
+import numpy as np
+from pysommer import MMESRegressor
+
+rng = np.random.default_rng(7001)
+n_groups = 10
+reps = 4
+group = np.repeat(np.arange(n_groups), reps)
+n = group.size
+
+X = np.ones((n, 1), dtype=float)
+Z = np.eye(n_groups)[group]
+K = np.eye(n_groups, dtype=float)
+
+y = 2.0 + Z @ rng.normal(0.0, np.sqrt(0.7), size=(n_groups, 1)) + rng.normal(0.0, np.sqrt(0.3), size=(n, 1))
+
+est = MMESRegressor(Z=[Z], K=[K], iters=40, method="newton_di_sp")
+est.fit(X, y)
+
+# Fixed-only predictions for arbitrary new design rows.
+yhat_fixed = est.predict(X)
+
+# Training-aligned fitted values (fixed + random) when X matches fit-time X.
+yhat_fitted = est.predict(X, include_random=True)
+
+print("coef:", est.coef_.ravel())
+print("theta:", est.theta_)
+print("score:", est.score(X, y))
+
+# Parameter API compatible with sklearn cloning / search tools.
+params = est.get_params()
+est.set_params(iters=50)
+```
+
+Optional sklearn interoperability dependency:
+
+```bash
+uv sync --extra sklearn
+```
+
 ## Next steps
 
-The following major pieces are still pending:
-
-1. [x] Add a high-level API closer to R `sommer` style (`mmes`/`vsm` formula-like interface) instead of matrix-only inputs.
-2. [x] Implement the second REML solver path (`ai_mme_sp` / Henderson-based AI) in Python.
-3. [x] Extend solver coverage for broader multivariate and advanced covariance structures beyond the current first-pass univariate core.
-4. [x] Add GWAS helper translations (`scorecalc`, `gwasForLoop`) and tests.
-5. [x] Expand cross-language validation with more real datasets and edge-case regression tests.
-6. [x] Improve user-facing docs with more end-to-end examples (multiple random terms, custom relationship matrices, prediction workflows).
-
-**Step 6 Summary: All end-to-end documentation complete**
-- ✅ Added 9 comprehensive regression tests for multiple random terms, custom relationships, and predictions (39 tests total passing)
-- ✅ Notebook examples: multiple random effects (genetic+spatial+block), custom matrices (AR1, CS, ARMA), prediction workflows, genomic selection
-- ✅ README documentation: 4 complete end-to-end examples with code and output
-- ✅ Cross-language validation patterns demonstrated and tested
+1. Add a formula-mode estimator interface (for `fixed` / `random` / `data`) with sklearn-style methods.
+2. Add richer sklearn interoperability examples (pipeline and cross-validation patterns) after formula-mode estimator support lands.
+3. Expand prediction helpers for out-of-sample random effect handling and uncertainty summaries.
+4. Publish the next release to TestPyPI, validate install/docs rendering, then publish to PyPI.
 
 ## Use In Jupyter Notebook
 
