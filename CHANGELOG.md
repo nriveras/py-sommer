@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.1
+
+- Harmonized naming from `py-sommer` to `pysommer`.
+
 ## 0.2.0
 
 - Added `sommer_version` metadata to `tests/reference_data/mmes_reference.json` export via `tests/test_sommer_reference.R` for explicit upstream-version traceability.
