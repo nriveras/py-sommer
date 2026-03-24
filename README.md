@@ -452,11 +452,11 @@ print(f"Location effect variance (CS): {fit['theta'].flatten()[1]:.4f}")
 
 ### Prediction Workflow Example
 
-Complete workflow: fitted values, residuals, predictions for new data, and cross-validation:
+Complete workflow: fitted values, out-of-sample random-effect predictions for known levels, uncertainty summaries, and cross-validation:
 
 ```python
 import numpy as np
-from pysommer import mmes
+from pysommer import mmes, predict_mmes, summarize_predictions
 
 rng = np.random.default_rng(6003)
 
@@ -478,17 +478,27 @@ fit = mmes(Y=y_train.ravel(), X=X_train, Z=[Z_train], K=[np.eye(n_train_fam)], i
 
 # ---- Prediction Stream 1: Training data fitted values and residuals ----
 beta = fit["beta"][0, 0]
-u_est = fit["u"][0].ravel()
-yhat_train = X_train.ravel() * beta + (Z_train @ u_est.reshape(-1, 1)).ravel()
+yhat_train = predict_mmes(fit, X_train, Z=[Z_train], include_random=True).ravel()
 resid_train = y_train.ravel() - yhat_train
 
 print(f"Training RMSE: {np.sqrt(np.mean(resid_train**2)):.4f}")
 print(f"Fixed effect estimate: {beta:.4f}")
 
-# ---- Prediction Stream 2: New families (use fixed effect only) ----
-n_new_fam = 3
-yhat_new = np.ones(n_new_fam * n_train_reps) * beta
-print(f"Predictions for new families: {yhat_new[0]:.4f} ± {np.sqrt(fit['theta'].flatten()[-1]):.4f}")
+# ---- Prediction Stream 2: New rows with seen and unseen families ----
+# Reuse fitted BLUPs for seen families by passing aligned Z rows.
+# Leave rows for unseen families all-zero so they fall back to fixed effects.
+X_new = np.ones((4, 1))
+Z_new = np.zeros((4, n_train_fam))
+Z_new[0, 1] = 1.0   # Seen family 1
+Z_new[1, 7] = 1.0   # Seen family 7
+# Rows 2 and 3 are unseen families, so their random-effect contribution stays 0.
+
+yhat_new = predict_mmes(fit, X_new, Z=[Z_new], include_random=True)
+summary = summarize_predictions(fit, X_new, Z=[Z_new], include_random=True)
+
+print("Predictions:", yhat_new.ravel().round(4))
+print("Prediction SD:", summary["prediction_sd"].ravel().round(4))
+print("95% interval first row:", summary["interval_lower"][0, 0].round(4), summary["interval_upper"][0, 0].round(4))
 
 # ---- Prediction Stream 3: Cross-validation concept ----
 # Fit on subset, predict on holdout
@@ -511,6 +521,8 @@ cv_rmse = np.sqrt(np.mean((y_cv_test.ravel() - yhat_cv)**2))
 
 print(f"Cross-validation RMSE (held-out families): {cv_rmse:.4f}")
 ```
+
+`summarize_predictions(...)` returns conditional uncertainty bands based on the fitted residual variance plus random-effect PEV contributions. Fixed-effect coefficient uncertainty is not yet included.
 
 ### Genomic Selection Example
 
@@ -573,8 +585,7 @@ For complete examples with R sommer comparison and detailed output, see [noteboo
 
 ## Example: Scikit-Learn-like Interface (`MMESRegressor`)
 
-`MMESRegressor` provides a familiar estimator API with `fit`, `predict`, `score`,
-`get_params`, and `set_params` while reusing the same solver backend as `mmes`.
+`MMESRegressor` provides a familiar estimator API with `fit`, `predict`, `predict_summary`, `score`, `get_params`, and `set_params` while reusing the same solver backend as `mmes`.
 
 ```python
 import numpy as np
@@ -601,9 +612,16 @@ yhat_fixed = est.predict(X)
 # Training-aligned fitted values (fixed + random) when X matches fit-time X.
 yhat_fitted = est.predict(X, include_random=True)
 
+# New rows can reuse fitted random effects when you pass aligned Z rows.
+X_new = np.ones((3, 1), dtype=float)
+Z_new = [np.eye(n_groups)[np.array([0, 4, 9])]]
+yhat_known = est.predict(X_new, include_random=True, Z=Z_new)
+summary = est.predict_summary(X_new, include_random=True, Z=Z_new)
+
 print("coef:", est.coef_.ravel())
 print("theta:", est.theta_)
 print("score:", est.score(X, y))
+print("prediction sd:", summary["prediction_sd"].ravel())
 
 # Parameter API compatible with sklearn cloning / search tools.
 params = est.get_params()
@@ -613,7 +631,9 @@ est.set_params(iters=50)
 ## Example: Formula-Mode Scikit-Learn-like Interface (`MMESFormulaRegressor`)
 
 `MMESFormulaRegressor` exposes sklearn-style methods while using formula mode
-(`fixed` / `random` / `data`) under the hood.
+(`fixed` / `random` / `data`) under the hood. For new data, known random-effect
+levels reuse fitted BLUPs and unseen levels automatically fall back to the
+fixed-effect component.
 
 ```python
 import numpy as np
@@ -650,11 +670,24 @@ yhat_fixed = est.predict(data)
 # Include random effects for exact training data.
 yhat_fitted = est.predict(data, include_random=True)
 
+new_data = {
+	"y": np.zeros(3),
+	"x": np.array([x[0], x[1], 0.25]),
+	"group": np.array([0, 3, 999]),
+}
+
+# group 0 and 3 reuse fitted random effects; group 999 is unseen and gets
+# fixed-only prediction.
+yhat_new = est.predict(new_data, include_random=True)
+summary = est.predict_summary(new_data, include_random=True)
+
 print("fixed names:", est.fixed_names_)
 print("random names:", est.random_names_)
 print("coef:", est.coef_.ravel())
 print("theta:", est.theta_)
 print("score:", est.score(data))
+print("new predictions:", yhat_new.ravel())
+print("random effect status:", summary["random_effect_status"])
 
 # sklearn-compatible parameter API.
 params = est.get_params()
@@ -748,7 +781,7 @@ dimensions.
 
 1. [X] Add a formula-mode estimator interface (for `fixed` / `random` / `data`) with sklearn-style methods.
 2. [X] Add richer sklearn interoperability examples (pipeline and cross-validation patterns) after formula-mode estimator support lands.
-3. [ ] Expand prediction helpers for out-of-sample random effect handling and uncertainty summaries.
+3. [X] Expand prediction helpers for out-of-sample random effect handling and uncertainty summaries.
 4. [ ] Publish the next release to TestPyPI, validate install/docs rendering, then publish to PyPI.
 
 ## Use In Jupyter Notebook

@@ -7,8 +7,14 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .formula import VSMCall
+from .formula import (
+    VSMCall,
+    build_prediction_random_terms,
+    build_random_from_vsm,
+    parse_fixed_formula,
+)
 from .mmes import mmes, mmes_formula, _normalize_random
+from .predict import predict_mmes, summarize_predictions
 
 try:  # pragma: no cover - optional import
     from sklearn.exceptions import NotFittedError
@@ -85,12 +91,14 @@ class MMESRegressor:
         self.intercept_: np.ndarray | None = None
         self.theta_: np.ndarray | None = None
         self.u_: list[np.ndarray] | None = None
+        self.pevs_: list[np.ndarray] | None = None
         self.fitted_: np.ndarray | None = None
         self.residuals_: np.ndarray | None = None
         self.converged_: bool | None = None
         self.n_features_in_: int | None = None
         self.n_samples_fit_: int | None = None
         self.X_fit_: np.ndarray | None = None
+        self.Z_fit_: list[np.ndarray] | None = None
 
     def get_params(self, deep: bool = True) -> dict[str, Any]:
         """Return constructor parameters for sklearn compatibility."""
@@ -201,20 +209,27 @@ class MMESRegressor:
         self.intercept_ = np.asarray(self.coef_[0, :], dtype=float)
         self.theta_ = np.asarray(out["theta"], dtype=float)
         self.u_ = [np.asarray(u_i, dtype=float) for u_i in out["u"]]
+        self.pevs_ = [np.asarray(pev_i, dtype=float) for pev_i in out["pevs"]]
         self.fitted_ = np.asarray(out["fitted"], dtype=float)
         self.residuals_ = np.asarray(out["residuals"], dtype=float)
         self.converged_ = bool(out["converged"])
         self.n_features_in_ = int(x_arr.shape[1])
         self.n_samples_fit_ = int(x_arr.shape[0])
         self.X_fit_ = x_arr.copy()
+        self.Z_fit_ = [np.asarray(z_i, dtype=float).copy() for z_i in z_terms]
         return self
 
-    def predict(self, X: np.ndarray | Sequence[float], include_random: bool = False) -> np.ndarray:
+    def predict(
+        self,
+        X: np.ndarray | Sequence[float],
+        include_random: bool = False,
+        Z: Sequence[np.ndarray] | None = None,
+    ) -> np.ndarray:
         """Predict responses for X.
 
         If ``include_random`` is True and ``X`` exactly matches training design,
-        return stored fitted values (fixed + random). Otherwise return fixed-only
-        predictions ``X @ beta``.
+        return stored fitted values (fixed + random). For new data, provide
+        aligned ``Z`` design matrices to reuse fitted random effects.
         """
         if self.coef_ is None or self.n_features_in_ is None:
             raise NotFittedError("This MMESRegressor instance is not fitted yet")
@@ -225,6 +240,7 @@ class MMESRegressor:
 
         if (
             include_random
+            and Z is None
             and self.X_fit_ is not None
             and self.fitted_ is not None
             and x_arr.shape == self.X_fit_.shape
@@ -232,7 +248,47 @@ class MMESRegressor:
         ):
             return self.fitted_.copy()
 
+        if include_random and Z is not None:
+            if self.result_ is None:
+                raise NotFittedError("This MMESRegressor instance is not fitted yet")
+            return predict_mmes(self.result_, x_arr, Z=Z, include_random=True)
+
         return x_arr @ self.coef_
+
+    def predict_summary(
+        self,
+        X: np.ndarray | Sequence[float],
+        include_random: bool = False,
+        Z: Sequence[np.ndarray] | None = None,
+        interval: float = 0.95,
+    ) -> dict[str, np.ndarray | float]:
+        """Return conditional predictions with approximate uncertainty bands."""
+        if self.result_ is None or self.coef_ is None or self.n_features_in_ is None:
+            raise NotFittedError("This MMESRegressor instance is not fitted yet")
+
+        x_arr = _as_2d(X, "X")
+        if x_arr.shape[1] != self.n_features_in_:
+            raise ValueError("X has a different number of features than seen in fit")
+
+        z_terms = Z
+        if include_random and z_terms is None:
+            if (
+                self.X_fit_ is not None
+                and self.Z_fit_ is not None
+                and x_arr.shape == self.X_fit_.shape
+                and np.allclose(x_arr, self.X_fit_)
+            ):
+                z_terms = self.Z_fit_
+            else:
+                raise ValueError("Z must be provided when include_random=True for new samples")
+
+        return summarize_predictions(
+            fit=self.result_,
+            X=x_arr,
+            Z=z_terms,
+            include_random=include_random,
+            interval=interval,
+        )
 
     def score(self, X: np.ndarray | Sequence[float], y: np.ndarray | Sequence[float]) -> float:
         """Return R-squared score on given data."""
@@ -307,6 +363,7 @@ class MMESFormulaRegressor:
         self.intercept_: np.ndarray | None = None
         self.theta_: np.ndarray | None = None
         self.u_: list[np.ndarray] | None = None
+        self.pevs_: list[np.ndarray] | None = None
         self.fitted_: np.ndarray | None = None
         self.residuals_: np.ndarray | None = None
         self.converged_: bool | None = None
@@ -316,6 +373,7 @@ class MMESFormulaRegressor:
         self.random_names_: list[str] | None = None
         self.data_fit_: Mapping[str, Any] | None = None
         self.response_name_: str | None = None
+        self.random_prediction_metadata_: list[dict[str, Any]] | None = None
 
     def get_params(self, deep: bool = True) -> dict[str, Any]:
         """Return constructor parameters for sklearn compatibility."""
@@ -386,6 +444,7 @@ class MMESFormulaRegressor:
         self.intercept_ = np.asarray(self.coef_[0, :], dtype=float)
         self.theta_ = np.asarray(out["theta"], dtype=float)
         self.u_ = [np.asarray(u_i, dtype=float) for u_i in out["u"]]
+        self.pevs_ = [np.asarray(pev_i, dtype=float) for pev_i in out["pevs"]]
         self.fitted_ = np.asarray(out["fitted"], dtype=float)
         self.residuals_ = np.asarray(out["residuals"], dtype=float)
         self.converged_ = bool(out["converged"])
@@ -394,6 +453,13 @@ class MMESFormulaRegressor:
         self.fixed_names_ = list(out.get("fixed_names", []))
         self.random_names_ = list(out.get("random_names", []))
         self.data_fit_ = data
+        random_terms = _normalize_random(self.random)
+        _, _, _, random_metadata = build_random_from_vsm(
+            random=random_terms,
+            data=data,
+            return_metadata=True,
+        )
+        self.random_prediction_metadata_ = list(random_metadata)
         # Extract response name from fixed formula (before the ~).
         if "~" in self.fixed:
             response_part = self.fixed.split("~", 1)[0].strip()
@@ -420,9 +486,6 @@ class MMESFormulaRegressor:
         if self.coef_ is None or self.n_features_in_ is None:
             raise NotFittedError("This MMESFormulaRegressor instance is not fitted yet")
 
-        # Extract X from the formula for new data.
-        from .formula import parse_fixed_formula
-
         _, x_new, _ = parse_fixed_formula(fixed=self.fixed, data=data)
         x_new = np.asarray(x_new, dtype=float)
 
@@ -431,16 +494,50 @@ class MMESFormulaRegressor:
                 f"Data has {x_new.shape[1]} features but expected {self.n_features_in_}"
             )
 
-        # If exact data match and include_random requested, return fitted values.
-        if (
-            include_random
-            and self.data_fit_ is not None
-            and self.fitted_ is not None
-            and data is self.data_fit_
-        ):
-            return self.fitted_.copy()
+        if include_random:
+            if self.result_ is None or self.random_prediction_metadata_ is None:
+                raise NotFittedError("This MMESFormulaRegressor instance is not fitted yet")
+            z_terms, _ = build_prediction_random_terms(self.random_prediction_metadata_, data)
+            return predict_mmes(self.result_, x_new, Z=z_terms, include_random=True)
 
         return x_new @ self.coef_
+
+    def predict_summary(
+        self,
+        data: Mapping[str, Any],
+        include_random: bool = False,
+        interval: float = 0.95,
+    ) -> dict[str, Any]:
+        """Return predictions plus approximate uncertainty summaries."""
+        if self.result_ is None or self.coef_ is None or self.n_features_in_ is None:
+            raise NotFittedError("This MMESFormulaRegressor instance is not fitted yet")
+
+        _, x_new, _ = parse_fixed_formula(fixed=self.fixed, data=data)
+        x_new = np.asarray(x_new, dtype=float)
+        if x_new.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"Data has {x_new.shape[1]} features but expected {self.n_features_in_}"
+            )
+
+        z_terms = None
+        random_status: list[dict[str, Any]] = []
+        if include_random:
+            if self.random_prediction_metadata_ is None:
+                raise NotFittedError("This MMESFormulaRegressor instance is not fitted yet")
+            z_terms, random_status = build_prediction_random_terms(
+                self.random_prediction_metadata_,
+                data,
+            )
+
+        summary = summarize_predictions(
+            fit=self.result_,
+            X=x_new,
+            Z=z_terms,
+            include_random=include_random,
+            interval=interval,
+        )
+        summary["random_effect_status"] = random_status
+        return summary
 
     def score(
         self,

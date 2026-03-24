@@ -7,6 +7,7 @@ from .formula import dsm, ism, usm, vsm
 from .gwas import gwasForLoop, scorecalc
 from .mmes import mmes, mmes_formula
 from .nearPD import nearPD, near_pd
+from .predict import predict_mmes, summarize_predictions
 from .relationships import A_mat, D_mat, E_mat, H_mat
 from .sklearn import MMESFormulaRegressor, MMESRegressor
 from .solver import SolverResult, ai_mme_sp, newton_di_sp
@@ -49,6 +50,8 @@ __all__ = [
     "scale_cpp",
     "scorecalc",
     "seq_cpp",
+    "predict_mmes",
+    "summarize_predictions",
     "usm",
     "var_cols",
     "vec_to_mat_cpp",

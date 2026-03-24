@@ -215,6 +215,35 @@ def test_mmes_regressor_predict_new_samples_fixed_only():
     np.testing.assert_allclose(y_new.ravel(), np.ones(5) * est.coef_[0, 0], rtol=1e-8, atol=1e-8)
 
 
+def test_mmes_regressor_predict_new_samples_with_random_design():
+    X, y, Z, K = _make_random_intercept_data(seed=1906)
+    est = MMESRegressor(Z=[Z], K=[K], iters=30)
+    est.fit(X, y)
+
+    X_new = np.ones((4, 1), dtype=float)
+    Z_new = [np.eye(K.shape[0])[np.array([0, 3, 5, 9])]]
+
+    y_new = est.predict(X_new, include_random=True, Z=Z_new)
+    expected = X_new @ est.coef_ + Z_new[0] @ est.u_[0]
+
+    np.testing.assert_allclose(y_new, expected, rtol=1e-8, atol=1e-8)
+
+
+def test_mmes_regressor_predict_summary_for_new_samples():
+    X, y, Z, K = _make_random_intercept_data(seed=1907)
+    est = MMESRegressor(Z=[Z], K=[K], iters=30)
+    est.fit(X, y)
+
+    X_new = np.ones((3, 1), dtype=float)
+    Z_new = [np.eye(K.shape[0])[np.array([1, 4, 8])]]
+
+    summary = est.predict_summary(X_new, include_random=True, Z=Z_new)
+
+    assert summary["predictions"].shape == (3, 1)
+    assert summary["prediction_sd"].shape == (3, 1)
+    assert np.all(summary["prediction_variance"] >= 0.0)
+
+
 # ============================================================================
 # Tests for MMESFormulaRegressor (formula-mode interface)
 # ============================================================================
@@ -445,3 +474,50 @@ def test_mmes_formula_regressor_predict_include_random():
 
     # Fixed-only should be different from stored fitted (unless by chance)
     assert not np.allclose(y_fixed_only, est.fitted_)
+
+
+def test_mmes_formula_regressor_predict_new_data_seen_and_unseen_levels():
+    data = _make_formula_data(seed=2507)
+    est = MMESFormulaRegressor(
+        fixed="y ~ 1 + x",
+        random=vsm(ism("group")),
+        iters=35,
+    )
+    est.fit(data)
+
+    new_data = {
+        "y": np.zeros(3, dtype=float),
+        "x": np.array([data["x"][0], data["x"][1], 0.25], dtype=float),
+        "group": np.array([0, 3, 999]),
+    }
+
+    pred = est.predict(new_data, include_random=True)
+    fixed_only = est.predict(new_data, include_random=False)
+
+    expected_seen = fixed_only[:2] + est.u_[0][[0, 3]]
+    np.testing.assert_allclose(pred[:2], expected_seen, rtol=1e-8, atol=1e-8)
+    np.testing.assert_allclose(pred[2:], fixed_only[2:], rtol=1e-8, atol=1e-8)
+
+
+def test_mmes_formula_regressor_predict_summary_reports_zeroed_rows():
+    data = _make_formula_data(seed=2508)
+    est = MMESFormulaRegressor(
+        fixed="y ~ 1 + x",
+        random=vsm(ism("group")),
+        iters=35,
+    )
+    est.fit(data)
+
+    new_data = {
+        "y": np.zeros(4, dtype=float),
+        "x": np.array([0.0, 0.5, -0.3, 1.2], dtype=float),
+        "group": np.array([0, 5, 999, 1000]),
+    }
+
+    summary = est.predict_summary(new_data, include_random=True)
+
+    assert summary["predictions"].shape == (4, 1)
+    assert summary["prediction_sd"].shape == (4, 1)
+    assert len(summary["random_effect_status"]) == 1
+    assert summary["random_effect_status"][0]["matched_rows"] == 2
+    assert summary["random_effect_status"][0]["zeroed_rows"] == 2

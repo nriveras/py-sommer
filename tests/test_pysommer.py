@@ -21,6 +21,8 @@ from pysommer import (
     scale_cpp,
     scorecalc,
     seq_cpp,
+    predict_mmes,
+    summarize_predictions,
     usm,
     var_cols,
     vec_to_mat_cpp,
@@ -902,6 +904,58 @@ def test_prediction_for_new_levels():
     # Should be close to the fixed effect value
     beta_intercept = out["beta"][0, 0]
     np.testing.assert_allclose(yhat_new, np.ones(n_new) * beta_intercept, rtol=1e-10)
+
+
+def test_predict_mmes_with_aligned_random_design():
+    """Public helper should reuse fitted random effects for compatible new Z terms."""
+    rng = np.random.default_rng(6081)
+    n_groups = 6
+    reps = 3
+    group = np.repeat(np.arange(n_groups), reps)
+
+    X = np.ones((group.size, 1), dtype=float)
+    Z = np.eye(n_groups)[group]
+    y = 1.4 + Z @ rng.normal(0.0, np.sqrt(0.5), size=(n_groups, 1)) + rng.normal(
+        0.0, np.sqrt(0.25), size=(group.size, 1)
+    )
+
+    out = mmes(Y=y.ravel(), X=X, Z=[Z], K=[np.eye(n_groups)], iters=35)
+
+    X_new = np.ones((3, 1), dtype=float)
+    Z_new = [np.eye(n_groups)[np.array([0, 2, 5])]]
+    pred = predict_mmes(out, X_new, Z=Z_new, include_random=True)
+
+    expected = X_new @ out["beta"] + Z_new[0] @ out["u"][0]
+    np.testing.assert_allclose(pred, expected, rtol=1e-8, atol=1e-8)
+
+
+def test_summarize_predictions_returns_expected_shapes():
+    """Prediction summary should expose mean, variance, sd, and intervals."""
+    rng = np.random.default_rng(6082)
+    n_groups = 5
+    reps = 4
+    group = np.repeat(np.arange(n_groups), reps)
+
+    X = np.ones((group.size, 1), dtype=float)
+    Z = np.eye(n_groups)[group]
+    y = 1.2 + Z @ rng.normal(0.0, np.sqrt(0.6), size=(n_groups, 1)) + rng.normal(
+        0.0, np.sqrt(0.3), size=(group.size, 1)
+    )
+
+    out = mmes(Y=y.ravel(), X=X, Z=[Z], K=[np.eye(n_groups)], iters=35)
+    X_new = np.ones((4, 1), dtype=float)
+    Z_new = [np.eye(n_groups)[np.array([0, 1, 3, 4])]]
+
+    summary = summarize_predictions(out, X_new, Z=Z_new, include_random=True)
+
+    assert summary["predictions"].shape == (4, 1)
+    assert summary["prediction_variance"].shape == (4, 1)
+    assert summary["prediction_sd"].shape == (4, 1)
+    assert summary["interval_lower"].shape == (4, 1)
+    assert summary["interval_upper"].shape == (4, 1)
+    assert np.all(summary["prediction_variance"] >= 0.0)
+    assert np.all(summary["interval_lower"] <= summary["predictions"])
+    assert np.all(summary["interval_upper"] >= summary["predictions"])
 
 
 def test_prediction_with_multiple_random_terms():
