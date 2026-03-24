@@ -637,16 +637,28 @@ def test_reference_solver_if_available():
     if "theta" not in payload:
         pytest.skip("No theta in mmes reference payload")
 
-    # Recreate the same data generation used in the R reference script.
-    rng = np.random.default_rng(123)
-    idv = np.repeat(np.arange(20), 2)
-    Z = np.eye(20)[idv]
-    X = np.ones((len(idv), 1))
-    u = rng.normal(0, np.sqrt(1.2), size=(20, 1))
-    e = rng.normal(0, np.sqrt(0.4), size=(len(idv), 1))
-    y = 2.0 + Z @ u + e
+    input_file = payload.get("mmes_input_file")
+    if input_file is not None:
+        input_path = Path(__file__).parent.parent / input_file
+    else:
+        input_path = REF_DIR / "mmes_input.csv"
 
-    out = mmes(Y=y, X=X, Z=[Z], K=[np.eye(20)], iters=50)
+    if not input_path.exists():
+        pytest.skip(f"mmes input CSV not found: {input_path}")
+
+    mmes_input = np.genfromtxt(input_path, delimiter=",", names=True)
+    col_names = set(mmes_input.dtype.names or ())
+    if not {"id", "y"}.issubset(col_names):
+        pytest.skip(f"mmes input CSV missing required columns id,y: {input_path}")
+
+    idv = np.asarray(mmes_input["id"], dtype=int)
+    y = np.asarray(mmes_input["y"], dtype=float).reshape(-1, 1)
+    n_levels = int(np.max(idv)) + 1
+
+    Z = np.eye(n_levels)[idv]
+    X = np.ones((len(idv), 1))
+
+    out = mmes(Y=y, X=X, Z=[Z], K=[np.eye(n_levels)], iters=50)
     theta_ref = np.asarray(payload["theta"], dtype=float).reshape(-1)
     theta_py = np.asarray(out["theta"], dtype=float).reshape(-1)
 
