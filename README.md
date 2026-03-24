@@ -45,8 +45,8 @@ pip install pysommer
 ### From source with uv (recommended)
 
 ```bash
-git clone https://github.com/nriveras/py-sommer
-cd py-sommer
+git clone https://github.com/nriveras/pysommer
+cd pysommer
 uv sync
 ```
 
@@ -642,14 +642,14 @@ uv sync --extra sklearn
 uv sync --dev
 
 # 2. Register a kernel
-uv run jupyter kernelspec remove py-sommer -f || true
-uv run python -m ipykernel install --user --name py-sommer --display-name "Python (py-sommer)"
+uv run jupyter kernelspec remove pysommer -f || true
+uv run python -m ipykernel install --user --name pysommer --display-name "Python (pysommer)"
 
 # 3. Start JupyterLab
 uv run jupyter lab
 ```
 
-Select the **Python (py-sommer)** kernel in the notebook UI.
+Select the **Python (pysommer)** kernel in the notebook UI.
 
 - Starter notebook: [notebooks/start_implementation.ipynb](notebooks/start_implementation.ipynb)
 - R-vs-Python comparison: [notebooks/compare_r_python_predictions.ipynb](notebooks/compare_r_python_predictions.ipynb)
