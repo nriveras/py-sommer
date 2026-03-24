@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.3
+
+- fix: changed package version in project and tag to match.
+
+## v0.2.2
+
+-  fix: refine conditions for TestPyPI publishing and enable verbose output for PyPI publish step
+
 ## 0.2.1
 
 - Harmonized naming from `py-sommer` to `pysommer`.
