@@ -8,6 +8,7 @@ from .gwas import gwasForLoop, scorecalc
 from .mmes import mmes, mmes_formula
 from .nearPD import nearPD, near_pd
 from .relationships import A_mat, D_mat, E_mat, H_mat
+from .sklearn import MMESFormulaRegressor, MMESRegressor
 from .solver import SolverResult, ai_mme_sp, newton_di_sp
 from .utils import (
     is_diagonal_mat,
@@ -34,6 +35,8 @@ __all__ = [
     "dsm",
     "gwasForLoop",
     "is_diagonal_mat",
+    "MMESFormulaRegressor",
+    "MMESRegressor",
     "is_identity_mat",
     "ism",
     "make_full",

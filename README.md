@@ -612,10 +612,10 @@ uv sync --extra sklearn
 
 ## Next steps
 
-1. Add a formula-mode estimator interface (for `fixed` / `random` / `data`) with sklearn-style methods.
-2. Add richer sklearn interoperability examples (pipeline and cross-validation patterns) after formula-mode estimator support lands.
-3. Expand prediction helpers for out-of-sample random effect handling and uncertainty summaries.
-4. Publish the next release to TestPyPI, validate install/docs rendering, then publish to PyPI.
+1. [X] Add a formula-mode estimator interface (for `fixed` / `random` / `data`) with sklearn-style methods.
+2. [ ] Add richer sklearn interoperability examples (pipeline and cross-validation patterns) after formula-mode estimator support lands.
+3. [ ] Expand prediction helpers for out-of-sample random effect handling and uncertainty summaries.
+4. [ ] Publish the next release to TestPyPI, validate install/docs rendering, then publish to PyPI.
 
 ## Use In Jupyter Notebook
 
