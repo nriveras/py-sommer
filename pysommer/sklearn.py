@@ -17,8 +17,12 @@ from .mmes import mmes, mmes_formula, _normalize_random
 from .predict import predict_mmes, summarize_predictions
 
 try:  # pragma: no cover - optional import
+    from sklearn.base import BaseEstimator
     from sklearn.exceptions import NotFittedError
 except ImportError:  # pragma: no cover - sklearn may be absent
+    class BaseEstimator:  # type: ignore[no-redef]
+        """Fallback base class when sklearn is not installed."""
+
     class NotFittedError(RuntimeError):
         """Raised when estimator methods are used before fitting."""
 
@@ -48,7 +52,7 @@ def _r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return 1.0 - (ss_res / ss_tot)
 
 
-class MMESRegressor:
+class MMESRegressor(BaseEstimator):
     """Scikit-learn-like regressor wrapper around ``pysommer.mmes``.
 
     This first implementation targets matrix mode only (``Y, X, Z, K``).
@@ -296,7 +300,7 @@ class MMESRegressor:
         return _r2_score(np.asarray(y, dtype=float), y_pred)
 
 
-class MMESFormulaRegressor:
+class MMESFormulaRegressor(BaseEstimator):
     """Scikit-learn-like regressor using formula-interface for mixed model REML.
 
     This estimator uses string formulas for fixed/random effects specification,
