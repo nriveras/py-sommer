@@ -58,13 +58,25 @@ write_mat("makeFull", full_rank)
 write_mat("nearPD", npd)
 
 # Simple random-intercept model for reference variance components.
-id <- as.factor(rep(1:20, each = 2))
-u <- rnorm(20, 0, sqrt(1.2))
-e <- rnorm(length(id), 0, sqrt(0.4))
-y <- 2 + u[as.integer(id)] + e
-dat <- data.frame(y = y, id = id)
+# Load from an external shared file so Python and R can compare exactly
+# the same observations.
+mmes_input_file <- file.path(out_dir, "mmes_input.csv")
+if (!file.exists(mmes_input_file)) {
+  stop("Missing shared mmes input file: ", mmes_input_file)
+}
+
+dat_in <- read.csv(mmes_input_file, stringsAsFactors = FALSE)
+if (!all(c("id", "y") %in% names(dat_in))) {
+  stop("mmes_input.csv must contain columns: id, y")
+}
+dat <- data.frame(
+  y = as.numeric(dat_in$y),
+  id = as.factor(dat_in$id)
+)
 
 solver_out <- list()
+solver_out$sommer_version <- as.character(packageVersion("sommer"))
+solver_out$mmes_input_file <- mmes_input_file
 fit <- try(
   mmes(
     y ~ 1,
@@ -83,16 +95,40 @@ fit <- try(
 if (!inherits(fit, "try-error")) {
   # sommer object structure may vary by version; keep a robust subset.
   solver_out$converged <- isTRUE(fit$convergence)
-  if (!is.null(fit$sigma)) {
-    solver_out$theta <- as.numeric(fit$sigma)
+
+  # Variance components are exposed as `theta` in current sommer versions,
+  # and as `sigma`/`sigma_scaled` in some older releases.
+  theta_mat <- NULL
+  if (!is.null(fit$theta)) {
+    theta_mat <- as.matrix(fit$theta)
+  } else if (!is.null(fit$sigma)) {
+    theta_mat <- as.matrix(fit$sigma)
   } else if (!is.null(fit$sigma_scaled)) {
-    solver_out$theta <- as.numeric(fit$sigma_scaled)
+    theta_mat <- as.matrix(fit$sigma_scaled)
   }
-  if (!is.null(fit$Beta)) {
-    solver_out$beta <- as.numeric(fit$Beta)
+
+  if (!is.null(theta_mat)) {
+    solver_out$theta <- as.numeric(theta_mat)
+    solver_out$theta_names <- rownames(theta_mat)
+  }
+
+  # Fixed effects are typically in `b` in current versions,
+  # and may appear as `Beta` in older ones.
+  beta_mat <- NULL
+  if (!is.null(fit$b)) {
+    beta_mat <- as.matrix(fit$b)
+  } else if (!is.null(fit$Beta)) {
+    beta_mat <- as.matrix(fit$Beta)
+  }
+
+  if (!is.null(beta_mat)) {
+    solver_out$beta <- as.numeric(beta_mat)
+    solver_out$beta_names <- rownames(beta_mat)
   }
 }
 
 write_json(solver_out, path = file.path(out_dir, "mmes_reference.json"), auto_unbox = TRUE, pretty = TRUE)
 
 cat("Reference data written to:", out_dir, "\n")
+
+

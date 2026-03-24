@@ -814,3 +814,12 @@ In VS Code or Jupyter, choose the kernel named **Python (py-sommer)** for notebo
 ```bash
 Rscript tests/test_sommer_reference.R
 ```
+
+The generated file `tests/reference_data/mmes_reference.json` includes
+`sommer_version`, which records the exact installed R `sommer` version used
+to produce the reference outputs.
+
+The random-intercept reference model is loaded from
+`tests/reference_data/mmes_input.csv`, so the same observations can be reused
+in the Python-vs-R comparison section of
+`notebooks/start_implementation.ipynb`.

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## 0.2.0 - Unreleased
 
+- Added `sommer_version` metadata to `tests/reference_data/mmes_reference.json` export via `tests/test_sommer_reference.R` for explicit upstream-version traceability.
 - Added public prediction helpers `predict_mmes` and `summarize_predictions` for matrix-mode fits, including conditional prediction intervals based on residual variance and random-effect PEV contributions.
 - Extended `MMESRegressor.predict()` to accept aligned `Z` terms for out-of-sample random-effect prediction and added `predict_summary()`.
 - Extended `MMESFormulaRegressor` so known factor levels reuse fitted random effects on new data while unseen levels fall back to fixed-only prediction, and added `predict_summary()` with per-term matched/zeroed row counts.

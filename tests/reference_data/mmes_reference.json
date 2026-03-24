@@ -1,3 +1,8 @@
 {
-  "converged": true
+  "sommer_version": "4.4.2",
+  "mmes_input_file": "tests/reference_data/mmes_input.csv",
+  "converged": true,
+  "theta": [0.8249, 0.3693],
+  "beta": 2.1726,
+  "beta_names": "(Intercept)"
 }
