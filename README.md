@@ -72,7 +72,13 @@ uv run python -c "import pysommer; print('ok')"
 ### Run tests
 
 ```bash
-uv run pytest tests/test_pysommer.py -q
+uv run pytest tests/ -q
+```
+
+Run only sklearn-like interface tests (including formula-mode estimator tests):
+
+```bash
+uv run pytest tests/test_sklearn_interface.py -q
 ```
 
 ## Python Model Setup Example
@@ -600,6 +606,57 @@ print("theta:", est.theta_)
 print("score:", est.score(X, y))
 
 # Parameter API compatible with sklearn cloning / search tools.
+params = est.get_params()
+est.set_params(iters=50)
+```
+
+## Example: Formula-Mode Scikit-Learn-like Interface (`MMESFormulaRegressor`)
+
+`MMESFormulaRegressor` exposes sklearn-style methods while using formula mode
+(`fixed` / `random` / `data`) under the hood.
+
+```python
+import numpy as np
+from pysommer import MMESFormulaRegressor, vsm, ism
+
+rng = np.random.default_rng(7002)
+n_groups = 8
+reps = 5
+group = np.repeat(np.arange(n_groups), reps)
+n = group.size
+
+x = rng.normal(0.0, 1.0, size=n)
+u = rng.normal(0.0, np.sqrt(0.6), size=(n_groups, 1))
+e = rng.normal(0.0, np.sqrt(0.35), size=(n, 1))
+y = 1.7 + 0.9 * x[:, None] + u[group] + e
+
+data = {
+	"y": y.ravel(),
+	"x": x,
+	"group": group,
+}
+
+est = MMESFormulaRegressor(
+	fixed="y ~ 1 + x",
+	random=vsm(ism("group")),
+	iters=40,
+	method="newton_di_sp",
+)
+est.fit(data)
+
+# Fixed-only predictions from formula-derived fixed design.
+yhat_fixed = est.predict(data)
+
+# Include random effects for exact training data.
+yhat_fitted = est.predict(data, include_random=True)
+
+print("fixed names:", est.fixed_names_)
+print("random names:", est.random_names_)
+print("coef:", est.coef_.ravel())
+print("theta:", est.theta_)
+print("score:", est.score(data))
+
+# sklearn-compatible parameter API.
 params = est.get_params()
 est.set_params(iters=50)
 ```

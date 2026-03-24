@@ -6,8 +6,8 @@ All notable changes to this project will be documented in this file.
 
 - Added a scikit-learn-like matrix-mode estimator interface via `MMESRegressor` with `fit`, `predict`, `score`, `get_params`, and `set_params`.
 - Added a formula-mode estimator interface via `MMESFormulaRegressor` supporting R-like formula syntax (`"y ~ 1 + x"`) with `vsm`/`ism`/`dsm`/`usm` random effect declarations.
-- Added formula-mode regression tests (8 tests) covering fit/predict/score, parameter protocol, parity with functional API, clone compatibility, multivariate responses, and input validation.
-- Added notebook examples (cells 11-14) comparing formula estimator vs functional API, demonstrating sklearn.clone compatibility, and R package comparison framework.
+- Added formula-mode regression tests (9 tests) covering fit/predict/score, parameter protocol, parity with functional API, clone compatibility, multivariate responses, input validation, and `include_random` prediction behavior.
+- Added notebook examples in `notebooks/start_implementation.ipynb` comparing formula estimator vs functional API, demonstrating sklearn.clone compatibility, and R package comparison framework.
 - Both estimator classes achieve numerical parity with underlying functional APIs (`mmes` and `mmes_formula`).
 - Added documentation and notebook examples for `MMESRegressor` and `MMESFormulaRegressor` usage.
 - Consolidated completed roadmap milestones from README into changelog-oriented release history.
