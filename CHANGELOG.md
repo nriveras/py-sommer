@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.2.0 - Unreleased
+## 0.2.0
 
 - Added `sommer_version` metadata to `tests/reference_data/mmes_reference.json` export via `tests/test_sommer_reference.R` for explicit upstream-version traceability.
 - Added public prediction helpers `predict_mmes` and `summarize_predictions` for matrix-mode fits, including conditional prediction intervals based on residual variance and random-effect PEV contributions.
