@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pysommer"
 version = "0.2.3"
-description = "Python translation of core computational routines from sommer"
+description = "Mixed Model Equations Solver in Python. Use the core algorithms originally implemented in the R package `sommer` written in C++ using python as interface"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
