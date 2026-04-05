@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.8", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "pysommer"
-version = "0.2.3"
-description = "Mixed Model Equations Solver in Python. Use the core algorithms originally implemented in the R package `sommer` written in C++ using python as interface"
+version = "0.3.0"
+description = "Mixed Model Equations Solver using the C++ core of the R sommer package with a Python interface"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -26,8 +26,6 @@ dev = [
   "scikit-learn>=1.3",
 ]
 
-[tool.setuptools]
-include-package-data = true
-
-[tool.setuptools.packages.find]
-include = ["pysommer*"]
+[tool.scikit-build]
+wheel.packages = ["pysommer"]
+build-dir = "build/{wheel_tag}"

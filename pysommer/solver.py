@@ -1,4 +1,4 @@
-"""Matrix-based REML solvers inspired by sommer core routines."""
+"""Matrix-based REML solvers — thin wrappers around sommer C++ core."""
 
 from __future__ import annotations
 
@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import List, Sequence
 
 import numpy as np
+
+from ._cpp._sommer_core import (  # type: ignore[import-not-found]
+    mnr as _mnr,
+)
 
 
 @dataclass
@@ -42,90 +46,149 @@ def _safe_inv(a: np.ndarray, tolparinv: float) -> np.ndarray:
         return np.linalg.inv(a + np.eye(a.shape[0]) * tolparinv)
 
 
-def _build_v(theta: np.ndarray, dv: Sequence[np.ndarray]) -> np.ndarray:
-    """Assemble the covariance matrix V from variance components and bases."""
-    v = np.zeros_like(dv[0])
-    for t, dvi in zip(theta, dv):
-        v += t * dvi
-    return (v + v.T) / 2.0
-
-
-def _initialize_theta(
-    y: np.ndarray,
-    m: int,
-    theta_init: np.ndarray | None,
-    tolpar: float,
-) -> np.ndarray:
-    """Create a valid initial variance-component vector."""
-    if theta_init is None:
-        vy = float(np.var(y, ddof=1))
-        theta = np.full(m, vy / max(m, 1), dtype=float)
-        theta[theta <= tolpar] = max(tolpar * 10.0, 1e-4)
-        return theta
-
-    theta = np.asarray(theta_init, dtype=float).reshape(-1)
-    if theta.size != m:
-        raise ValueError("theta_init must have len(Z)+1 elements")
-    return np.maximum(theta, tolpar)
-
-
-def _initialize_weights(
-    iters: int,
-    stepweight: np.ndarray | None,
-    emweight: np.ndarray | None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return per-iteration step and EM-mixing weights."""
+def _default_weights(iters: int, stepweight, emweight):
+    """Return per-iteration step and EM-mixing weights as 1-D float arrays."""
     if stepweight is None:
-        step = np.full(iters, 0.9, dtype=float)
+        sw = np.full(iters, 0.9, dtype=float)
         if iters > 0:
-            step[0] = 0.5
+            sw[0] = 0.5
         if iters > 1:
-            step[1] = 0.7
+            sw[1] = 0.7
     else:
-        step = np.asarray(stepweight, dtype=float).reshape(-1)
-        if step.size < iters:
-            raise ValueError("stepweight must have at least 'iters' elements")
+        sw = np.asarray(stepweight, dtype=float).ravel()
 
     if emweight is None:
-        em = np.zeros(iters, dtype=float)
+        ew = np.zeros(iters, dtype=float)
     else:
-        em = np.asarray(emweight, dtype=float).reshape(-1)
-        if em.size < iters:
-            raise ValueError("emweight must have at least 'iters' elements")
+        ew = np.asarray(emweight, dtype=float).ravel()
 
-    return step, em
+    return sw, ew
 
 
-def _partition_indices(block_sizes: Sequence[int]) -> list[tuple[int, int]]:
-    """Convert block sizes into half-open index ranges."""
-    parts: list[tuple[int, int]] = []
-    start = 0
-    for sz in block_sizes:
-        end = start + int(sz)
-        parts.append((start, end))
-        start = end
-    return parts
+def _parse_mnr_result(
+    res: dict,
+    y: np.ndarray,
+    x: np.ndarray,
+    z_list: list[np.ndarray],
+) -> SolverResult:
+    """Convert the py::dict returned by C++ MNR/newton_di_sp into a SolverResult."""
+    beta = np.asarray(res["b"])
+    convergence = bool(res["convergence"])
+
+    # Monitor: rows = variance parameters, columns = iterations
+    monitor = np.asarray(res["monitor"])
+    if monitor.ndim == 2:
+        theta = monitor[:, -1]
+        iterations = int(monitor.shape[1])
+    else:
+        theta = monitor
+        iterations = 1
+
+    # logLik
+    llik = np.asarray(res["llik"])
+    if llik.ndim >= 2:
+        loglik = float(llik[0, -1])
+    elif llik.ndim == 1:
+        loglik = float(llik[-1])
+    else:
+        loglik = float(llik)
+
+    # u partitions and PEVs from uList/uPevList
+    u_list_raw = res.get("uList", [])
+    u_pev_raw = res.get("uPevList", [])
+
+    u_list: list[np.ndarray] = []
+    pevs: list[np.ndarray] = []
+
+    if u_list_raw is not None and len(u_list_raw) > 0:
+        for item in u_list_raw:
+            u_list.append(np.asarray(item))
+    else:
+        u_all = np.asarray(res.get("u", np.zeros((0, 1))))
+        u_list = [u_all]
+
+    if u_pev_raw is not None and len(u_pev_raw) > 0:
+        for item in u_pev_raw:
+            pevs.append(np.asarray(item))
+    else:
+        pevs = [np.full((u.shape[0], u.shape[0]), np.nan) for u in u_list]
+
+    # C++ returns fitted = X*beta only; add random part for full fitted
+    fitted = x @ beta
+    for zi, ui in zip(z_list, u_list):
+        fitted = fitted + zi @ ui
+    residuals = y - fitted
+
+    return SolverResult(
+        theta=theta,
+        beta=beta,
+        u=u_list,
+        log_likelihood=loglik,
+        converged=convergence,
+        iterations=iterations,
+        fitted=fitted,
+        residuals=residuals,
+        pevs=pevs,
+    )
 
 
-def _loglik_reml(y: np.ndarray, x: np.ndarray, v: np.ndarray, tolparinv: float) -> float:
-    """Compute the restricted log-likelihood for a Gaussian mixed model."""
+def _call_mnr(
+    y: np.ndarray,
+    x: np.ndarray,
+    z_list: list[np.ndarray],
+    k_list: list[np.ndarray],
+    r: np.ndarray,
+    iters: int,
+    tolpar: float,
+    tolparinv: float,
+    ai: bool,
+    pev: bool,
+    verbose: bool,
+    stepweight: np.ndarray | None,
+    emweight: np.ndarray | None,
+) -> dict:
+    """Prepare inputs and call the C++ MNR solver."""
     n = y.shape[0]
-    p = x.shape[1]
+    nt = 1  # univariate
 
-    vi = _safe_inv(v, tolparinv=tolparinv)
-    xvix = x.T @ vi @ x
-    xvix_i = _safe_inv(xvix, tolparinv=tolparinv)
+    sw, ew = _default_weights(iters, stepweight, emweight)
 
-    beta = xvix_i @ (x.T @ vi @ y)
-    e = y - x @ beta
+    # MNR expects:
+    #   Y: (n, nt) dense matrix
+    #   X: list of (n, p) dense matrices (one per trait)
+    #   Gx: list of (nt, nt) scaling matrices (one per random term)
+    #   Z: list of (n, q) dense matrices (one per random term)
+    #   K: list of (q, q) dense matrices (one per random term)
+    #   R: list of (n, n) sparse residual matrices
+    #   Ge: list of (nt, nt) initial variance matrices (one per random+residual term)
+    #   GeI: list of (nt, nt) constraint matrices (one per random+residual term)
+    #   W: (n, n) weight matrix
+    n_random = len(z_list)
+    n_re = n_random + 1  # + residual
 
-    sign_v, logdet_v = np.linalg.slogdet(v)
-    sign_x, logdet_x = np.linalg.slogdet(xvix)
-    if sign_v <= 0 or sign_x <= 0:
-        return float("-inf")
+    vary = float(np.var(y, ddof=1))
+    if vary <= 0:
+        vary = 1.0
+    init_var = vary / max(n_re, 1)
 
-    quad = float(np.sum(e.T @ vi @ e))
-    return -0.5 * (logdet_v + logdet_x + quad + (n - p) * np.log(2.0 * np.pi))
+    X_list = [x]
+    Gx = [np.eye(nt) for _ in range(n_random)]
+    R_list = [r]  # single residual term
+
+    # Initial variance component estimates (scaled by vary)
+    Ge = [np.full((nt, nt), init_var) for _ in range(n_re)]
+    # Constraint indicators (1 = estimate this parameter)
+    GeI = [np.ones((nt, nt)) for _ in range(n_re)]
+
+    W = np.eye(n)
+
+    return _mnr(
+        y, X_list, Gx, z_list, k_list, R_list, Ge, GeI,
+        W, False,
+        iters, tolpar, tolparinv,
+        ai, pev, verbose, False,
+        sw, ew,
+    )
 
 
 def newton_di_sp(
@@ -160,120 +223,17 @@ def newton_di_sp(
 
     z_list = [np.asarray(zi, dtype=float) for zi in Z]
     k_list = [np.asarray(ki, dtype=float) for ki in K]
-    for zi in z_list:
-        if zi.shape[0] != n:
-            raise ValueError("Each Z_i must have same number of rows as Y")
 
     if R is None:
         r = np.eye(n)
     else:
         r = np.asarray(R, dtype=float)
-        if r.shape != (n, n):
-            raise ValueError("R must be n x n")
 
-    m = len(z_list) + 1
-    theta = _initialize_theta(y=y, m=m, theta_init=theta_init, tolpar=tolpar)
-    stepweight, emweight = _initialize_weights(
-        iters=iters,
-        stepweight=stepweight,
-        emweight=emweight,
-    )
+    res = _call_mnr(y, x, z_list, k_list, r,
+                    iters, tolpar, tolparinv, ai, pev, verbose,
+                    stepweight, emweight)
 
-    dv = [zi @ ki @ zi.T for zi, ki in zip(z_list, k_list)] + [r]
-
-    converged = False
-    loglik = float("-inf")
-    beta = np.zeros((x.shape[1], 1), dtype=float)
-    vi = np.eye(n)
-    pmat = np.eye(n)
-
-    for it in range(iters):
-        v = _build_v(theta, dv)
-        vi = _safe_inv(v, tolparinv=tolparinv)
-
-        xvix = x.T @ vi @ x
-        xvix_i = _safe_inv(xvix, tolparinv=tolparinv)
-        vi_x = vi @ x
-        pmat = vi - vi_x @ xvix_i @ vi_x.T
-
-        beta = xvix_i @ (x.T @ vi @ y)
-        py = pmat @ y
-
-        score = np.zeros(m, dtype=float)
-        info = np.zeros((m, m), dtype=float)
-
-        p_dv = [pmat @ dvi for dvi in dv]
-        for i in range(m):
-            quad_i = float(np.sum(y.T @ p_dv[i] @ py))
-            score[i] = -0.5 * np.trace(p_dv[i]) + 0.5 * quad_i
-
-        for i in range(m):
-            for j in range(i, m):
-                if ai:
-                    vij = 0.5 * float(np.sum(y.T @ p_dv[i] @ p_dv[j] @ py))
-                else:
-                    vij = 0.5 * np.trace(p_dv[i] @ p_dv[j])
-                info[i, j] = vij
-                info[j, i] = vij
-
-        info += np.eye(m) * tolparinv
-        try:
-            ai_update = np.linalg.solve(info, score)
-        except np.linalg.LinAlgError:
-            ai_update = np.linalg.pinv(info) @ score
-
-        em_update = score / np.maximum(np.diag(info), tolparinv)
-        update = (1.0 - emweight[it]) * ai_update + emweight[it] * em_update
-
-        theta_new = theta + stepweight[it] * update
-        theta_new = np.maximum(theta_new, tolpar)
-
-        diff = np.linalg.norm(theta_new - theta)
-        theta = theta_new
-
-        loglik = _loglik_reml(y, x, v, tolparinv=tolparinv)
-        if verbose:
-            print(
-                f"iter={it + 1} logLik={loglik:.6f} diff={diff:.3e} "
-                f"theta={np.array2string(theta, precision=6)}"
-            )
-
-        if diff < tolpar:
-            converged = True
-            break
-
-    fitted_fixed = x @ beta
-    resid = y - fitted_fixed
-
-    u_hat = []
-    pevs = []
-    for i, (zi, ki) in enumerate(zip(z_list, k_list)):
-        gi = theta[i] * ki
-        ui = gi @ zi.T @ vi @ resid
-        u_hat.append(ui)
-
-        if pev:
-            c_uu = gi - gi @ zi.T @ pmat @ zi @ gi
-        else:
-            c_uu = np.full((gi.shape[0], gi.shape[0]), np.nan)
-        pevs.append(c_uu)
-
-    fitted = fitted_fixed.copy()
-    for zi, ui in zip(z_list, u_hat):
-        fitted += zi @ ui
-    resid = y - fitted
-
-    return SolverResult(
-        theta=theta,
-        beta=beta,
-        u=u_hat,
-        log_likelihood=loglik,
-        converged=converged,
-        iterations=it + 1,
-        fitted=fitted,
-        residuals=resid,
-        pevs=pevs,
-    )
+    return _parse_mnr_result(res, y, x, z_list)
 
 
 def ai_mme_sp(
@@ -293,9 +253,9 @@ def ai_mme_sp(
 ) -> SolverResult:
     """Henderson-style MME REML updates (AI/EM hybrid).
 
-    This implements a univariate, dense-matrix translation of the Henderson MME
-    update route where variance components are updated from MME-derived first
-    derivatives and an Average Information matrix built from working variates.
+    Note: This now uses the same C++ newton_di_sp core via MNR, which
+    supports both AI and EM weighting schemes. The separate Henderson
+    MME pathway may be exposed in a future release.
     """
     y = _as_col(Y)
     x = np.asarray(X, dtype=float)
@@ -308,180 +268,14 @@ def ai_mme_sp(
 
     z_list = [np.asarray(zi, dtype=float) for zi in Z]
     k_list = [np.asarray(ki, dtype=float) for ki in K]
-    for zi in z_list:
-        if zi.shape[0] != n:
-            raise ValueError("Each Z_i must have same number of rows as Y")
 
     if R is None:
-        r0 = np.eye(n)
+        r = np.eye(n)
     else:
-        r0 = np.asarray(R, dtype=float)
-        if r0.shape != (n, n):
-            raise ValueError("R must be n x n")
+        r = np.asarray(R, dtype=float)
 
-    m = len(z_list) + 1
-    theta = _initialize_theta(y=y, m=m, theta_init=theta_init, tolpar=tolpar)
-    stepweight, emweight = _initialize_weights(
-        iters=iters,
-        stepweight=stepweight,
-        emweight=emweight,
-    )
+    res = _call_mnr(y, x, z_list, k_list, r,
+                    iters, tolpar, tolparinv, True, pev, verbose,
+                    stepweight, emweight)
 
-    # Keep direct V decomposition for logLik parity with newton_di_sp.
-    dv = [zi @ ki @ zi.T for zi, ki in zip(z_list, k_list)] + [r0]
-
-    q_sizes = [zi.shape[1] for zi in z_list]
-    u_parts = _partition_indices(q_sizes)
-    q_total = int(np.sum(q_sizes))
-    z_all = np.hstack(z_list) if len(z_list) > 0 else np.zeros((n, 0), dtype=float)
-
-    converged = False
-    loglik = float("-inf")
-    beta = np.zeros((x.shape[1], 1), dtype=float)
-    u_hat_stack = np.zeros((q_total, 1), dtype=float)
-    c_uu = np.zeros((q_total, q_total), dtype=float)
-    w_mat = np.hstack([x, z_all]) if q_total > 0 else x
-
-    r0_inv = _safe_inv(r0, tolparinv=tolparinv)
-
-    for it in range(iters):
-        sigma_e = max(theta[-1], tolpar)
-        r_inv = r0_inv / sigma_e
-
-        # Build block-diagonal G^{-1} = blockdiag(K_i^{-1}/theta_i).
-        if q_total > 0:
-            g_inv = np.zeros((q_total, q_total), dtype=float)
-            k_inv_list: list[np.ndarray] = []
-            for (start, end), ki, th in zip(u_parts, k_list, theta[:-1]):
-                ki_inv = _safe_inv(ki, tolparinv=tolparinv)
-                k_inv_list.append(ki_inv)
-                g_inv[start:end, start:end] = ki_inv / max(th, tolpar)
-        else:
-            g_inv = np.zeros((0, 0), dtype=float)
-            k_inv_list = []
-
-        # Build and solve mixed model equations.
-        x_r = x.T @ r_inv
-        c11 = x_r @ x
-        rhs1 = x_r @ y
-
-        if q_total > 0:
-            c12 = x_r @ z_all
-            c21 = c12.T
-            c22 = z_all.T @ r_inv @ z_all + g_inv
-            rhs2 = z_all.T @ r_inv @ y
-
-            c = np.block([[c11, c12], [c21, c22]])
-            rhs = np.vstack([rhs1, rhs2])
-        else:
-            c = c11
-            rhs = rhs1
-
-        c = (c + c.T) / 2.0
-        c_inv = _safe_inv(c, tolparinv=tolparinv)
-        bu = c_inv @ rhs
-
-        beta = bu[: x.shape[1], :]
-        if q_total > 0:
-            u_hat_stack = bu[x.shape[1] :, :]
-            c_uu = c_inv[x.shape[1] :, x.shape[1] :]
-        else:
-            u_hat_stack = np.zeros((0, 1), dtype=float)
-            c_uu = np.zeros((0, 0), dtype=float)
-
-        fitted = x @ beta
-        if q_total > 0:
-            fitted = fitted + z_all @ u_hat_stack
-        resid = y - fitted
-
-        # First derivatives and EM information proxy.
-        dlu = np.zeros(m, dtype=float)
-        em_info = np.zeros((m, m), dtype=float)
-        wu_cols: list[np.ndarray] = []
-
-        for idx, ((start, end), zi, ki_inv) in enumerate(zip(u_parts, z_list, k_inv_list)):
-            th_i = max(theta[idx], tolpar)
-            ui = u_hat_stack[start:end, :]
-            cuu_i = c_uu[start:end, start:end]
-            qi = max(end - start, 1)
-
-            quad = float(np.asarray(ui.T @ ki_inv @ ui).squeeze())
-            tr_term = float(np.trace(ki_inv @ cuu_i))
-            num = quad + tr_term
-
-            dlu[idx] = (qi / th_i) - (num / (th_i**2))
-            em_info[idx, idx] = qi / (th_i**2)
-
-            # Working variate for this random term: Z * (K^{-1} u / theta).
-            u_sinv = (ki_inv @ ui) / th_i
-            wu_cols.append(zi @ u_sinv)
-
-        ri2 = r_inv @ r_inv
-        tr_ri = float(np.trace(r_inv))
-        c_trace = float(np.trace(c_inv @ (w_mat.T @ ri2 @ w_mat)))
-        e_quad = float(np.asarray(resid.T @ ri2 @ resid).squeeze())
-        dlu[-1] = tr_ri - c_trace - e_quad
-        em_info[-1, -1] = n / (sigma_e**2)
-        wu_cols.append(r_inv @ resid)
-
-        wu = np.hstack(wu_cols) if len(wu_cols) > 0 else np.zeros((n, 0), dtype=float)
-
-        # Average Information matrix from working variates.
-        xw = w_mat.T @ r_inv @ wu
-        wiwj = wu.T @ r_inv @ wu
-        bu_wu = c_inv @ xw
-        ai_info = wiwj - (bu_wu.T @ xw)
-        ai_info = (ai_info + ai_info.T) / 2.0
-
-        info = (1.0 - emweight[it]) * ai_info + emweight[it] * em_info
-        info = (info + info.T) / 2.0 + np.eye(m, dtype=float) * tolparinv
-
-        try:
-            delta = np.linalg.solve(info, dlu)
-        except np.linalg.LinAlgError:
-            delta = np.linalg.pinv(info) @ dlu
-
-        theta_new = theta - stepweight[it] * delta
-        theta_new = np.maximum(theta_new, tolpar)
-
-        diff = np.linalg.norm(theta_new - theta)
-        theta = theta_new
-
-        v = _build_v(theta, dv)
-        loglik = _loglik_reml(y, x, v, tolparinv=tolparinv)
-        if verbose:
-            print(
-                f"iter={it + 1} logLik={loglik:.6f} diff={diff:.3e} "
-                f"theta={np.array2string(theta, precision=6)}"
-            )
-
-        if diff < tolpar:
-            converged = True
-            break
-
-    u_hat: list[np.ndarray] = []
-    pevs: list[np.ndarray] = []
-    for start, end in u_parts:
-        u_hat.append(u_hat_stack[start:end, :])
-        if pev:
-            pevs.append(c_uu[start:end, start:end])
-        else:
-            n_u = end - start
-            pevs.append(np.full((n_u, n_u), np.nan))
-
-    fitted = x @ beta
-    for zi, ui in zip(z_list, u_hat):
-        fitted += zi @ ui
-    resid = y - fitted
-
-    return SolverResult(
-        theta=theta,
-        beta=beta,
-        u=u_hat,
-        log_likelihood=loglik,
-        converged=converged,
-        iterations=it + 1,
-        fitted=fitted,
-        residuals=resid,
-        pevs=pevs,
-    )
+    return _parse_mnr_result(res, y, x, z_list)

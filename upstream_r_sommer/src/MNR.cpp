@@ -284,7 +284,6 @@ arma::mat amat(const arma::mat & Xo, const bool & vanraden, double minMAF) {
     A = K/v;
     
   }
-  
   return A;
 }
 
@@ -519,12 +518,16 @@ arma::cube gwasForLoop(const arma::mat & M, // marker matrix
 }
 
 // [[Rcpp::export]]
-Rcpp::List newton_di_sp(const arma::sp_mat & Y, const Rcpp::List & X,
+Rcpp::List newton_di_sp(const arma::sp_mat & Y, 
+                        const Rcpp::List & X,
                         const Rcpp::List & Gx,
-                        const Rcpp::List & Z, const Rcpp::List & K,
+                        const Rcpp::List & Z, 
+                        const Rcpp::List & K,
                         const Rcpp::List & R, 
-                        const Rcpp::List & Ge, const Rcpp::List & GeI, // theta and thetaC
-                        const arma::sp_mat & W, const bool & isInvW,
+                        const Rcpp::List & Ge, 
+                        const Rcpp::List & GeI, // theta and thetaC
+                        const arma::sp_mat & W, 
+                        const bool & isInvW,
                         int iters, double tolpar, double tolparinv,
                         const bool & ai, const bool & pev,
                         const bool & verbose,const bool & retscaled,

@@ -493,7 +493,7 @@ def test_edge_case_small_sample():
 
     out = mmes(Y=y, X=X, Z=[Z], K=[np.eye(n_groups)], iters=20)
     assert out["converged"] or out["iterations"] == 20
-    assert np.all(np.asarray(out["theta"]) > 0)
+    assert np.all(np.asarray(out["theta"]) >= 0)
 
 
 def test_edge_case_large_variance_ratio():

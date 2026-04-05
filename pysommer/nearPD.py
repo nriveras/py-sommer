@@ -1,8 +1,10 @@
-"""Nearest positive-definite projection (Higham-style, matching sommer nearPDcpp)."""
+"""Nearest positive-definite projection — C++ core wrapper."""
 
 from __future__ import annotations
 
 import numpy as np
+
+from ._cpp._sommer_core import near_pd_cpp as _near_pd_cpp  # type: ignore[import-not-found]
 
 
 def nearPD(
@@ -14,34 +16,7 @@ def nearPD(
     x = np.asarray(x0, dtype=float)
     if x.ndim != 2 or x.shape[0] != x.shape[1]:
         raise ValueError("x0 must be a square matrix")
-
-    x = (x + x.T) / 2.0
-    n = x.shape[0]
-    d_s = np.zeros((n, n), dtype=float)
-
-    for _ in range(maxit):
-        y = x
-        r = y - d_s
-        eigvals, eigvecs = np.linalg.eigh((r + r.T) / 2.0)
-        thresh = eig_tol * eigvals[0]
-        keep = eigvals > thresh
-        if not np.any(keep):
-            break
-        q = eigvecs[:, keep]
-        dp = eigvals[keep]
-        x = (q * dp) @ q.T
-        d_s = x - r
-
-        denom = np.linalg.norm(y, ord=np.inf)
-        if denom == 0:
-            if np.linalg.norm(y - x, ord=np.inf) <= conv_tol:
-                break
-        else:
-            conv = np.linalg.norm(y - x, ord=np.inf) / denom
-            if conv <= conv_tol:
-                break
-
-    return (x + x.T) / 2.0
+    return np.asarray(_near_pd_cpp(x, maxit, eig_tol, conv_tol))
 
 
 def near_pd(

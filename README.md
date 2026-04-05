@@ -703,3 +703,8 @@ tests/                 pytest suite + R reference scripts + reference_data/
 notebooks/             Jupyter notebooks (starter + R comparison)
 upstream_r_sommer/     Unmodified upstream R sommer source (reference only)
 ```
+
+# ToDo
+
++ Review equivalence of core `pysommer/_cpp/sommer_core.cpp` to `upstream_r_sommer/src/MNR.cpp`
+  + Done until l:683 

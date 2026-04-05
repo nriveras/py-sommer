@@ -1,6 +1,6 @@
 """pysommer: Python translation of sommer computational core (Phase 1)."""
 
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 
 from .covariance import AR1, ARMA, CS
 from .formula import dsm, ism, usm, vsm
