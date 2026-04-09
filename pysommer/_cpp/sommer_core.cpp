@@ -581,7 +581,7 @@ py::dict newton_di_sp_cpp(
     const std::vector<arma::sp_mat> & K,
     const std::vector<arma::sp_mat> & R,
     const std::vector<arma::mat> & Ge,
-    const std::vector<arma::mat> & GeI,
+    const std::vector<arma::mat> & GeI, // theta and thetaC
     const arma::sp_mat & W,
     const bool & isInvW,
     int iters, double tolpar, double tolparinv,
@@ -710,7 +710,7 @@ py::dict newton_di_sp_cpp(
   }
   arma::vec sigmaF_ut_un = sigma_ut_un; // make a copy for fixed-value vc's when we use constraints
   arma::vec coef_ut_un = sigma_ut_un; // make a 2nd copy of the same vector for stabilization
-  arma::vec coef_ut_un_explode = sigma_ut_un; // make a 3rd copy for checking issues with vc going too early outside the parameter space
+  arma::vec coef_ut_un_explode = sigma_ut_un; // make a 3rd copy of the same vector for checking issues with vc going too early outside the parameter space
 
   int kk = sigma_ut_un.n_elem; // how many VCs are in the model?
   arma::vec llstore(iters); // container for LL
@@ -726,11 +726,12 @@ py::dict newton_di_sp_cpp(
   for(int i=0; i < n_re; i++){ // for each random effect
     const arma::mat & prov = GeI[i];
     int ncol = prov.n_cols; // traits
+
     for (int k = 0; k < ncol; k++){ // go through GeI(i) and make the dummy derivatives where there's a value > 0
       for (int j = 0; j < ncol; j++){
         if (k > j){}else{
+          // only extract the variance component if it was planned to be estimated
           if(prov(k,j) > 0){
-            // only extract the variance component if it was planned to be estimated
             arma::mat prov4(ncol,ncol,arma::fill::zeros);
             prov4(k,j)=1;
             prov4 = arma::symmatu(prov4);
@@ -742,7 +743,6 @@ py::dict newton_di_sp_cpp(
       }
     }
   }
-
   // ****************************************************
   // ****************************************************
   // ##### iterative algorithm starts
@@ -806,6 +806,7 @@ py::dict newton_di_sp_cpp(
     } // sigmatwo now has all VCs in a vector
 
     // multivariate ZKZ' and V
+
     int i;
     for(i=0; i < n_re; i++){ // loop for filling the multivariate ZGZ' and V
       if(last_iteration == true){ // if is the last iteration multivariate ZKZ is opposite
@@ -854,6 +855,7 @@ py::dict newton_di_sp_cpp(
     }
     arma::mat VX = Vi * Xm; // VX
     arma::mat tXVX = Xm.t() * VX; // X'VX
+
     arma::mat tXVXVX; // X'VXVX
     tXVXVX = arma::solve(tXVX, VX.t()); // X'VXVX
     arma::solve(tXVXVX,tXVX,VX.t());
@@ -949,6 +951,7 @@ py::dict newton_di_sp_cpp(
       }
       Inf = arma::symmatu(Inf); // copy lower in upper triangular
       Inf_inv = arma::pinv(Inf, 1.490116e-08); // Inverse of Fishers or information matrix
+
       if(Inf_inv.n_rows == 0){
         throw std::runtime_error("System is singular (Inf_inv). Aborting the job. Try a bigger number of tolParInv.");
       }
@@ -1015,6 +1018,7 @@ py::dict newton_di_sp_cpp(
         // }
         delta(no_restrain) = deltanorestrain;
         delta(restrain) = delta(restrain)*0;
+
       } //else just keep going
       // end of parameter restrain
       // ^^^^^^^^^^^^^^^^^^
@@ -1042,20 +1046,17 @@ py::dict newton_di_sp_cpp(
       // update before time to be the now to be used in the next iteration
       time_t before = time(0);
       localtime(&before);
-
       // store parameters
       sigma_store.col(cycle) = sigmatwo;
       if(cycle > 0){
         sigma_perc_change.col(cycle) = ((coef_ut_un/sigma_store.col(cycle-1))-1) * 100; // percent change
       }
       llik_store(cycle) = llik;
-
       // return output to the console
       if(verbose == true){
         if(cycle == 0){std::cout << "iteration   " << " LogLik   " << "  wall    " << "cpu(sec)   " << "restrained" << std::endl;}
         std::cout << "    " << cycle+1 << "      " <<  llik << "   " << ltm->tm_hour << ":" << ltm->tm_min << ":" << ltm->tm_sec << "      " << seconds << "           " << cc.n_elem << std::endl;
       }
-
       // define the end of the algorithm
       if(((cycle > 2) && (delta_llik < tolpar)) || cycle == iters-1 ){
         cycle2 = cycle;
@@ -1069,6 +1070,7 @@ py::dict newton_di_sp_cpp(
             sigma.slice(i) = (sigma.slice(i)%base_var)/sc_var;
           }
         }
+
         // Fisher inverse
         arma::mat FI = Inf/2;
         arma::vec myone(pos.n_elem,arma::fill::ones);
@@ -1079,26 +1081,29 @@ py::dict newton_di_sp_cpp(
           throw std::runtime_error("System is singular (sigma_cov). Aborting the job. Try a bigger number of tolParInv.");
         }
       }
+    
     }else{ // if we are in the last iteration now we calculate u, PEV, B, XB
+
       arma::inv(tXVXi,tXVX);
       if(tXVXi.n_rows == 0){ // if fails try to invert with diag(1e-6)
         arma::inv(tXVXi,tXVX+(D*(tolparinv)));
-        if(tXVXi.n_rows == 0){
+        if(tXVXi.n_rows == 0){// if fails try to invert with diag(1e-5)
           arma::inv(tXVXi,tXVX+(D*(tolparinv*10)));
           if(tXVXi.n_rows == 0){
             throw std::runtime_error("System is singular (tXVXi). Aborting the job. Try a bigger number of tolParInv.");
           }
         }
       }
-      // b = (X'VX)-X'Vy or (X'VX)-X'VYs
-      if(retscaled == true){
+      // arma::vec Ym_rw = vectorise(Y.t());
+      if(retscaled == true){// if we have to return scaled results we use Yms
         beta = tXVXi * ((Xm.t() * Vi) * Ysm);
-      }else{
+      }else{// we return in normal scale
         beta = tXVXi * ((Xm.t() * Vi) * Ym);
       }
-      fitted = Xm * beta; // X * b
-      residuals = Ym - fitted; // Y - Xb
-      arma::mat Vie = Vi * residuals; // Vi * e = Vi * (Y - Xb)
+
+      fitted = Xm * beta;
+      residuals = Ym - fitted; 
+      arma::mat Vie = Vi * residuals;
       // calculate BLUPs and PEVs
       if(n_random > 0){
         for(i=0; i < n_random; i++){
@@ -1106,20 +1111,25 @@ py::dict newton_di_sp_cpp(
           arma::mat Ki = arma::mat(K[i]);
           arma::mat VarK;
           arma::mat ZKfv;
-          if(Ki.n_cols == Zprov.n_cols){
+
+          // IMPORTANT
+          // for rrBLUP models we had to allow a K matrix to be a 1 x 1 matrix so dimensions do not match with Z
+          if(Ki.n_cols == Zprov.n_cols){ // if a regular random effect
             VarK = arma::kron(arma::mat(K[i]),sigma.slice(i)); // Kron(K sigma)
             ZKfv = VarK * arma::kron(Zprov.t(),dD); // (G) (Z'I) = Z' G
-          }else{
+          }else{ // if huge matrix from models like rrBLUP we need to create a diagonal to calculate VarK and BLUPs
             ZKfv = arma::kron(Zprov.t(),dD*sigma.slice(i)); // (Z'I) * sigma when K is identity
           }
           U_list[i] = ZKfv * Vie; // BLUP = Z' G Vi (Y - Xb)
           if(pev==true){
-            if(Ki.n_cols == Zprov.n_cols){
+            if(Ki.n_cols == Zprov.n_cols){ // if a regular random effect
               VarU_list[i] = ZKfv * (P * ZKfv.t()); // var(u) = Z' G [Vi - VX(X'VX)-XV] G Z' = Z' G P G Z'
               PevU_list[i] = VarK - VarU_list[i]; // PEV = G - var(u)
             }else{
-              VarU_list[i] = ZKfv * (P * ZKfv.t()); // var(u) = Z' sigma P sigma Z'
-              PevU_list[i] = VarU_list[i]; // PEV = var(u) when K is identity
+              VarU_list[i] = ZKfv * (P * ZKfv.t()); // var(u) = Z' G [Vi - (VX*tXVXVX)] G Z'
+              // TO BE FIXED
+              // not sure how to get the PEV without constructing VarK due to high-memory requirements in rrBLUP models with potentially millions of SNPs
+              PevU_list[i] = VarU_list[i]; // PEV = G - var(u)
             }
           }
         }
